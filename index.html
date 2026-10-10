@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Cloud Jukebox</title>
+<title>MP3 Player</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
@@ -14,6 +14,11 @@
   --danger:#ff8d7a;
   --font:'Bricolage Grotesque',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
 }
+
+:root[data-theme="plum"]{--bg:#24122f;--surface:#ffffff14;--surface-solid:#36204a;--line:#5a3c76;--text:#f3ecf7;--muted:#b59fc7;--accent:#ff9f80;--accent-ink:#3a1300}
+:root[data-theme="midnight"]{--bg:#0f1626;--surface:#ffffff12;--surface-solid:#19233a;--line:#2f3f63;--text:#e8eefb;--muted:#93a3c4;--accent:#6fb8ff;--accent-ink:#00213d}
+:root[data-theme="forest"]{--bg:#14261c;--surface:#ffffff12;--surface-solid:#1d3a2a;--line:#34594a;--text:#eef2e6;--muted:#a3b8a0;--accent:#e8d28a;--accent-ink:#2c2400}
+:root[data-theme="daylight"]{--bg:#eef2f6;--surface:#0000000d;--surface-solid:#ffffff;--line:#cfd8e3;--text:#17202e;--muted:#5b6b80;--accent:#d9480f;--accent-ink:#ffffff;--danger:#c92a2a}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:16px;line-height:1.45}
 body{padding-top:env(safe-area-inset-top,0px);padding-bottom:calc(110px + env(safe-area-inset-bottom,0px))}
@@ -79,8 +84,8 @@ details.album summary::-webkit-details-marker{display:none}
 </head>
 <body>
 <header>
-  <h1>Cloud Jukebox</h1>
-  <div><span class="who" id="who"></span><button class="btn small hidden" id="signOut">Sign out</button></div>
+  <h1>MP3 Player</h1>
+  <div><button class="btn small" id="themeBtn" title="Change colour scheme">Colours</button> <span class="who" id="who"></span><button class="btn small hidden" id="signOut">Sign out</button></div>
   </header>
 
 <main>
@@ -138,6 +143,13 @@ const CONFIG = Object.assign({
   authority: 'https://login.microsoftonline.com/consumers',
   scopes: ['Files.Read', 'User.Read']
 }, window.APP_CONFIG || {});
+
+/* ---------- Colour themes ---------- */
+const THEMES = ['teal', 'plum', 'midnight', 'forest', 'daylight'];
+function setTheme(t){
+  if (!THEMES.includes(t)) t = 'teal';
+  document.documentElement.dataset.theme = t; store.set('theme', t);
+}
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 const AUDIO_RE = /\.(mp3|m4a|aac|ogg|wav|flac)$/i;
@@ -442,7 +454,7 @@ function showNow(t){
   const f = lib.folders.get(t.folder), c = f && coverOf(f);
   $('nowCover').outerHTML = imgTag(c, 'cover', 'nowCover');
   if ('mediaSession' in navigator){
-    navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.folder.split('/').pop() || 'Cloud Jukebox', album: queueName,
+    navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.folder.split('/').pop() || 'MP3 Player', album: queueName,
       artwork: c ? [{ src: c.url }] : [] });
   }
 }
@@ -488,6 +500,11 @@ if ('mediaSession' in navigator){
 $('signIn').addEventListener('click', signIn);
 $('signOut').addEventListener('click', signOut);
 syncToggles();
+setTheme(store.get('theme') || CONFIG.theme || 'teal');
+$('themeBtn').addEventListener('click', () => {
+  const cur = document.documentElement.dataset.theme || 'teal';
+  setTheme(THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length]);
+});
 initAuth();
 </script>
 </body>
