@@ -9,16 +9,13 @@
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#0e2a31; --surface:#15394288; --surface-solid:#153942; --line:#2b5560;
-  --text:#e9f1ec; --muted:#91b0b0; --accent:#f3b94d; --accent-ink:#2a1c00;
-  --danger:#ff8d7a;
+  --bg:#eef2f6; --surface:#0000000d; --surface-solid:#ffffff; --line:#cfd8e3;
+  --text:#17202e; --muted:#5b6b80; --accent:#d9480f; --accent-ink:#ffffff;
+  --danger:#c92a2a;
   --font:'Bricolage Grotesque',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
 }
 
-:root[data-theme="plum"]{--bg:#24122f;--surface:#ffffff14;--surface-solid:#36204a;--line:#5a3c76;--text:#f3ecf7;--muted:#b59fc7;--accent:#ff9f80;--accent-ink:#3a1300}
-:root[data-theme="midnight"]{--bg:#0f1626;--surface:#ffffff12;--surface-solid:#19233a;--line:#2f3f63;--text:#e8eefb;--muted:#93a3c4;--accent:#6fb8ff;--accent-ink:#00213d}
-:root[data-theme="forest"]{--bg:#14261c;--surface:#ffffff12;--surface-solid:#1d3a2a;--line:#34594a;--text:#eef2e6;--muted:#a3b8a0;--accent:#e8d28a;--accent-ink:#2c2400}
-:root[data-theme="daylight"]{--bg:#eef2f6;--surface:#0000000d;--surface-solid:#ffffff;--line:#cfd8e3;--text:#17202e;--muted:#5b6b80;--accent:#d9480f;--accent-ink:#ffffff;--danger:#c92a2a}
+:root[data-theme="dark"]{--bg:#0c0c0d;--surface:#ffffff14;--surface-solid:#1b1b1d;--line:#363639;--text:#f1f1f2;--muted:#9c9ca3;--accent:#ff7a3d;--accent-ink:#1a0800;--danger:#ff8d7a}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:16px;line-height:1.45}
 body{padding-top:env(safe-area-inset-top,0px);padding-bottom:calc(110px + env(safe-area-inset-bottom,0px))}
@@ -85,7 +82,7 @@ details.album summary::-webkit-details-marker{display:none}
 <body>
 <header>
   <h1>MP3 Player</h1>
-  <div><button class="btn small" id="themeBtn" title="Change colour scheme">Colours</button> <span class="who" id="who"></span><button class="btn small hidden" id="signOut">Sign out</button></div>
+  <div><button class="btn small" id="themeBtn" title="Switch between dark and light">Dark mode</button> <span class="who" id="who"></span><button class="btn small hidden" id="signOut">Sign out</button></div>
   </header>
 
 <main>
@@ -145,10 +142,11 @@ const CONFIG = Object.assign({
 }, window.APP_CONFIG || {});
 
 /* ---------- Colour themes ---------- */
-const THEMES = ['teal', 'plum', 'midnight', 'forest', 'daylight'];
+const THEMES = ['light', 'dark'];
 function setTheme(t){
-  if (!THEMES.includes(t)) t = 'teal';
+  if (!THEMES.includes(t)) t = 'light';
   document.documentElement.dataset.theme = t; store.set('theme', t);
+  const b = document.getElementById('themeBtn'); if (b) b.textContent = t === 'dark' ? 'Light mode' : 'Dark mode';
 }
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
@@ -500,11 +498,8 @@ if ('mediaSession' in navigator){
 $('signIn').addEventListener('click', signIn);
 $('signOut').addEventListener('click', signOut);
 syncToggles();
-setTheme(store.get('theme') || CONFIG.theme || 'teal');
-$('themeBtn').addEventListener('click', () => {
-  const cur = document.documentElement.dataset.theme || 'teal';
-  setTheme(THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length]);
-});
+setTheme(store.get('theme') || CONFIG.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+$('themeBtn').addEventListener('click', () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
 initAuth();
 </script>
 </body>
