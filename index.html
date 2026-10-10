@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cloud Jukebox</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0e2a31; --surface:#15394288; --surface-solid:#153942; --line:#2b5560;
+  --text:#e9f1ec; --muted:#91b0b0; --accent:#f3b94d; --accent-ink:#2a1c00;
+  --danger:#ff8d7a;
+  --font:'Bricolage Grotesque',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:16px;line-height:1.45}
+body{padding-top:env(safe-area-inset-top,0px);padding-bottom:calc(110px + env(safe-area-inset-bottom,0px))}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);z-index:5}
+h1{font-size:1.35rem;font-weight:800;margin:0;letter-spacing:-.02em}
+.who{color:var(--muted);font-size:.85rem;margin-right:8px;max-width:30vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn{border:1px solid var(--line);background:transparent;border-radius:999px;padding:8px 16px;font-weight:600}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.small{padding:5px 12px;font-size:.85rem}
+main{max-width:860px;margin:0 auto;padding:18px}
+.hidden{display:none!important}
+.hero{padding:48px 0 24px}
+.hero h2{font-size:clamp(2rem,8vw,3.4rem);line-height:1.05;margin:0 0 14px;font-weight:800;letter-spacing:-.03em}
+.hero p{color:var(--muted);max-width:46ch;margin:0 0 22px}
+.status{color:var(--muted);font-size:.9rem;min-height:1.4em;margin:6px 0 12px}
+.status.err{color:var(--danger)}
+.crumbs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px;color:var(--muted)}
+.crumbs button{background:none;border:0;padding:2px 4px;color:var(--text);text-decoration:underline;text-underline-offset:3px}
+.list{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+.list li{border-bottom:1px solid var(--line)}
+.list .row{display:flex;width:100%;align-items:center;gap:12px;background:none;border:0;text-align:left;padding:12px 4px}
+.list .row:hover{background:var(--surface)}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.bar input[type=search]{flex:1;min-width:140px;background:var(--surface-solid);border:1px solid var(--line);color:var(--text);padding:9px 14px;border-radius:999px;font:inherit}
+h3{font-size:1.05rem;margin:26px 0 8px;font-weight:600;color:var(--muted)}
+details.album{border-bottom:1px solid var(--line)}
+details.album summary{display:flex;align-items:center;gap:14px;padding:12px 4px;cursor:pointer;list-style:none}
+details.album summary::-webkit-details-marker{display:none}
+.cover{width:60px;height:60px;border-radius:6px;background:var(--surface-solid);border:1px solid var(--line);object-fit:cover;flex:none;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:1.4rem}
+.meta{flex:1;min-width:0}
+.meta b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta span{color:var(--muted);font-size:.85rem}
+.tracks{padding:0 0 10px 74px}
+.track{display:flex;width:100%;gap:10px;background:none;border:0;text-align:left;padding:7px 8px;border-radius:6px;align-items:baseline}
+.track:hover{background:var(--surface)}
+.track.playing{color:var(--accent)}
+.track small{color:var(--muted);min-width:1.8em;text-align:right}
+#player{position:fixed;left:0;right:0;bottom:0;background:var(--surface-solid);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));z-index:10}
+#player .inner{max-width:860px;margin:0 auto;display:grid;grid-template-columns:auto 1fr auto;gap:6px 14px;align-items:center}
+#player .cover{width:52px;height:52px;grid-row:span 2}
+#nowTitle{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#nowSub{color:var(--muted);font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ctl{display:flex;gap:4px;align-items:center;grid-row:span 2}
+.ico{background:none;border:0;width:40px;height:40px;border-radius:50%;font-size:1.1rem;display:flex;align-items:center;justify-content:center}
+.ico:hover{background:var(--surface)}
+.ico.on{color:var(--accent)}
+.ico.main{background:var(--accent);color:var(--accent-ink);width:46px;height:46px}
+.seek{grid-column:1/-1;display:flex;gap:8px;align-items:center;color:var(--muted);font-size:.78rem}
+.seek input{flex:1;accent-color:var(--accent)}
+@media (max-width:560px){
+  #player .inner{grid-template-columns:auto 1fr}
+  .ctl{grid-column:1/-1;grid-row:auto;justify-content:center}
+  #player .cover{grid-row:auto}
+  .tracks{padding-left:8px}
+  .who{display:none}
+  body{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))}
+}
+@media (prefers-reduced-motion:no-preference){ .btn{transition:border-color .15s} }
+</style>
+</head>
+<body>
+<header>
+  <h1>Cloud Jukebox</h1>
+  </header>
+
+<main>
+  <!-- Start: paste share link -->
+  <section id="vStart" class="hero hidden">
+    <h2>Your OneDrive music, played properly.</h2>
+    <p>Paste a OneDrive share link to your music folder (set to “Anyone with the link can view”). No sign-in needed.</p>
+    <div class="bar">
+      <input type="url" id="linkInput" placeholder="https://1drv.ms/f/... or onedrive.live.com link" aria-label="OneDrive share link" style="flex:1;min-width:200px;background:var(--surface-solid);border:1px solid var(--line);color:var(--text);padding:10px 16px;border-radius:999px;font:inherit">
+      <button class="btn primary" id="loadLink">Load music</button>
+    </div>
+    <div class="status err" id="startMsg"></div>
+  </section>
+
+  <!-- Library -->
+  <section id="vLibrary" class="hidden">
+    <div class="bar">
+      <input type="search" id="search" placeholder="Search tracks and folders" aria-label="Search">
+      <button class="btn small" id="shuffleAll">Shuffle all</button>
+      <button class="btn small" id="changeFolder">Change link</button>
+      <button class="btn small" id="rescan">Rescan</button>
+    </div>
+    <div class="status" id="libStatus"></div>
+    <div id="libraryBody"></div>
+  </section>
+</main>
+
+<div id="player" class="hidden">
+  <div class="inner">
+    <div class="cover" id="nowCover">♪</div>
+    <div style="min-width:0"><div id="nowTitle">Nothing playing</div><div id="nowSub"></div></div>
+    <div class="ctl">
+      <button class="ico" id="bShuffle" title="Shuffle" aria-label="Shuffle">⤮</button>
+      <button class="ico" id="bPrev" title="Previous" aria-label="Previous">⏮</button>
+      <button class="ico main" id="bPlay" title="Play/pause" aria-label="Play or pause">▶</button>
+      <button class="ico" id="bNext" title="Next" aria-label="Next">⏭</button>
+      <button class="ico" id="bRepeat" title="Repeat: off" aria-label="Repeat">⟳</button>
+    </div>
+    <div class="seek"><span id="tCur">0:00</span><input type="range" id="seek" min="0" max="1000" value="0" aria-label="Seek"><span id="tDur">0:00</span></div>
+  </div>
+  <audio id="audio" preload="auto"></audio>
+</div>
+
+<script>
+/* ================= CONFIG ================= */
+const CONFIG = {
+  shareUrl: ''   // optional: hard-code your share link. Leave empty to paste it in the page
+                 // (note: anything in a public GitHub repo is public, including this link)
+};
+/* ========================================== */
+
+const API = 'https://api.onedrive.com/v1.0';
+const AUDIO_RE = /\.(mp3|m4a|aac|ogg|wav|flac)$/i;
+const LIST_RE  = /\.(m3u8?|pls)$/i;
+const IMG_RE   = /\.(jpe?g|png|gif|webp)$/i;
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const store = {
+  get(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } },
+  set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+};
+
+/* ---------- Share-link access (anonymous) ---------- */
+let sid = '', mode = 0;   // mode 0 = address children by item id, 1 = by path (auto-switches if one fails)
+const shareId = url => 'u!' + btoa(unescape(encodeURIComponent(url.trim()))).replace(/=+$/,'').replace(/\//g,'_').replace(/\+/g,'-');
+const encPath = p => p.split('/').map(encodeURIComponent).join('/');
+const dl = it => it['@content.downloadUrl'] || it['@microsoft.graph.downloadUrl'] || '';
+
+async function jget(url){
+  for (let i = 0; i < 4; i++){
+    const res = await fetch(url);
+    if (res.status === 429 || res.status === 503){ await sleep((parseInt(res.headers.get('Retry-After')) || 2 ** i) * 1000); continue; }
+    if (!res.ok) throw new Error('OneDrive returned ' + res.status);
+    return res.json();
+  }
+  throw new Error('OneDrive is busy, try again shortly');
+}
+function childUrls(f){
+  const q = '?$top=200';
+  const byId   = f.id   ? `${API}/shares/${sid}/driveItem/items/${f.id}/children${q}` : `${API}/shares/${sid}/driveItem/children${q}`;
+  const byPath = f.path ? `${API}/shares/${sid}/root:/${encPath(f.path)}:/children${q}` : `${API}/shares/${sid}/root/children${q}`;
+  return mode === 1 ? [byPath, byId] : [byId, byPath];
+}
+async function listChildren(f, cb){
+  const urls = childUrls(f); let d, err;
+  for (let k = 0; k < urls.length; k++){
+    try { d = await jget(urls[k]); if (k === 1) mode = 1 - mode; break; } catch(e){ err = e; }
+  }
+  if (!d) throw err;
+  while (d){
+    d.value.forEach(cb);
+    d = d['@odata.nextLink'] ? await jget(d['@odata.nextLink']) : null;
+  }
+}
+async function refreshUrl(item){
+  for (const u of [`${API}/shares/${sid}/driveItem/items/${item.id}`, `${API}/shares/${sid}/root:/${encPath(item.path)}`]){
+    try { const d = await jget(u); const x = dl(d); if (x){ item.url = x; item.urlAt = Date.now(); return x; } } catch(e){}
+  }
+  item.url = `${API}/shares/${sid}/driveItem/items/${item.id}/content`;   // redirecting fallback link
+  item.urlAt = Date.now();
+  return item.url;
+}
+const stale = item => !item.url || Date.now() - (item.urlAt || 0) > 25 * 60 * 1000;
+
+/* ---------- Views ---------- */
+function show(id){ ['vStart','vLibrary'].forEach(v => $(v).classList.toggle('hidden', v !== id)); }
+function openStart(msg){
+  stopPlayback(); $('player').classList.add('hidden');
+  $('linkInput').value = store.get('shareUrl') || '';
+  $('startMsg').textContent = msg || ''; show('vStart');
+}
+function startWith(url){
+  url = (url || '').trim();
+  if (!/^https?:\/\//i.test(url)){ $('startMsg').textContent = 'Paste a full link that starts with https://'; return; }
+  store.set('shareUrl', url); sid = shareId(url); mode = 0;
+  scan(url);
+}
+$('loadLink').addEventListener('click', () => startWith($('linkInput').value));
+$('linkInput').addEventListener('keydown', e => { if (e.key === 'Enter') startWith($('linkInput').value); });
+
+/* ---------- Library scan ---------- */
+let lib = { folders: new Map(), playlists: [], tracks: new Map() };
+async function scan(url){
+  const rootName = 'Shared folder';
+  show('vLibrary'); $('libraryBody').innerHTML = '';
+  lib = { folders: new Map(), playlists: [], tracks: new Map() };
+  const queue = [{ id: null, path: '' }]; let rootFailed = false;
+  let active = 0, foldersDone = 0;
+  const setMsg = () => { $('libStatus').textContent = `Scanning ${rootName}… ${foldersDone} folders, ${lib.tracks.size} tracks`; };
+  setMsg();
+  const worker = async () => {
+    while (true){
+      const f = queue.shift();
+      if (!f){ if (!active) return; await sleep(40); continue; }
+      active++;
+      try {
+        const rec = { path: f.path, name: f.path ? f.path.split('/').pop() : rootName, tracks: [], images: [] };
+        lib.folders.set(f.path, rec);
+        await listChildren(f.id, it => {
+          if (it.folder){ queue.push({ id: it.id, path: f.path ? f.path + '/' + it.name : it.name }); return; }
+          if (!it.file) return;
+          const base = { id: it.id, name: it.name, folder: f.path, path: f.path ? f.path + '/' + it.name : it.name, url: dl(it), urlAt: Date.now() };
+          if (AUDIO_RE.test(it.name)){
+            const t = { ...base, title: it.name.replace(/\.[^.]+$/, '').replace(/_/g, ' ') };
+            rec.tracks.push(t); lib.tracks.set(t.id, t);
+          } else if (LIST_RE.test(it.name)){
+            lib.playlists.push({ ...base, title: it.name.replace(/\.[^.]+$/, '') });
+          } else if (IMG_RE.test(it.name)){
+            rec.images.push(base);
+          }
+        });
+      } catch(e){ if (!f.path) rootFailed = true; else $('libStatus').textContent = 'Some folders could not be read: ' + e.message; }
+      finally { active--; foldersDone++; setMsg(); }
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  if (rootFailed && !lib.tracks.size && !lib.playlists.length){ openStart('Could not open that link. It must be a personal OneDrive folder shared with “Anyone with the link can view”.'); return; }
+  const nat = (a,b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+  lib.folders.forEach(f => { f.tracks.sort(nat); f.images.sort(nat); });
+  lib.playlists.sort(nat);
+  $('libStatus').textContent = `${lib.tracks.size} tracks · ${lib.playlists.length} playlists · ${[...lib.folders.values()].filter(f=>f.tracks.length).length} folders`;
+  renderLibrary();
+}
+
+function coverOf(folder){
+  const imgs = folder.images;
+  return imgs.find(i => /^(cover|folder|front|album)/i.test(i.name)) || imgs[0] || null;
+}
+function imgTag(item, cls, id){
+  if (!item) return `<div class="${cls}">♪</div>`;
+  return `<img class="${cls}" alt="" loading="lazy" ${id?`id="${id}"`:''} src="${esc(item.url)}" data-img="${esc(item.id)}">`;
+}
+document.addEventListener('error', async e => {           // refresh expired image links once
+  const img = e.target; if (!(img instanceof HTMLImageElement) || !img.dataset.img || img.dataset.retry) return;
+  img.dataset.retry = '1';
+  const item = findImage(img.dataset.img); if (!item) return;
+  try { img.src = await refreshUrl(item); } catch(_){}
+}, true);
+function findImage(id){ for (const f of lib.folders.values()){ const i = f.images.find(x => x.id === id); if (i) return i; } return null; }
+
+function renderLibrary(){
+  const q = $('search').value.trim().toLowerCase();
+  let html = '';
+  if (lib.playlists.length && !q){
+    html += '<h3>Playlists</h3><ul class="list">' + lib.playlists.map(p =>
+      `<li><button class="row" data-act="playlist" data-id="${esc(p.id)}"><span class="cover" style="width:36px;height:36px;font-size:1rem">≡</span><span class="meta"><b>${esc(p.title)}</b><span>${esc(p.folder || 'Top folder')}</span></span></button></li>`).join('') + '</ul>';
+  }
+  html += '<h3>Folders</h3>';
+  [...lib.folders.values()].filter(f => f.tracks.length).sort((a,b)=>a.path.localeCompare(b.path,undefined,{numeric:true})).forEach(f => {
+    const tracks = q ? f.tracks.filter(t => t.title.toLowerCase().includes(q) || f.path.toLowerCase().includes(q)) : f.tracks;
+    if (!tracks.length) return;
+    html += `<details class="album" ${q ? 'open' : ''}><summary>${imgTag(coverOf(f),'cover')}<span class="meta"><b>${esc(f.name)}</b><span>${esc(f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) + ' · ' : '')}${tracks.length} tracks</span></span>
+      <button class="btn small" data-act="playFolder" data-f="${esc(f.path)}">Play</button></summary>
+      <div class="tracks">${tracks.map((t,i) => `<button class="track" data-act="playTrack" data-f="${esc(f.path)}" data-id="${esc(t.id)}"><small>${i+1}</small><span>${esc(t.title)}</span></button>`).join('')}</div></details>`;
+  });
+  if (!lib.tracks.size) html += '<p class="status">No audio files found in this folder. Try another folder.</p>';
+  $('libraryBody').innerHTML = html;
+  markPlaying();
+}
+let st; $('search').addEventListener('input', () => { clearTimeout(st); st = setTimeout(renderLibrary, 150); });
+$('changeFolder').addEventListener('click', () => openStart());
+$('rescan').addEventListener('click', () => { const u = store.get('shareUrl'); if (u) startWith(u); });
+$('shuffleAll').addEventListener('click', () => { shuffle = true; syncToggles(); setQueue([...lib.tracks.values()], Math.floor(Math.random() * lib.tracks.size), 'All music'); });
+
+$('libraryBody').addEventListener('click', async e => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  e.preventDefault(); e.stopPropagation();
+  const act = el.dataset.act;
+  if (act === 'playFolder'){ const f = lib.folders.get(el.dataset.f); setQueue(f.tracks, 0, f.name); }
+  else if (act === 'playTrack'){ const f = lib.folders.get(el.dataset.f); setQueue(f.tracks, f.tracks.findIndex(t => t.id === el.dataset.id), f.name); }
+  else if (act === 'playlist'){ playPlaylist(lib.playlists.find(p => p.id === el.dataset.id)); }
+});
+
+/* ---------- Playlist files (.m3u / .m3u8 / .pls) ---------- */
+async function playPlaylist(p){
+  $('libStatus').textContent = `Loading playlist “${p.title}”…`;
+  try {
+    if (stale(p)) await refreshUrl(p);
+    let text;
+    try { text = await (await fetch(p.url)).text(); }
+    catch(_){ text = await (await fetch(`${API}/shares/${sid}/driveItem/items/${p.id}/content`)).text(); }
+    const names = parsePlaylist(text, p.name);
+    const byName = new Map();
+    lib.tracks.forEach(t => { const k = t.name.toLowerCase(); (byName.get(k) || byName.set(k, []).get(k)).push(t); });
+    const out = []; let missing = 0;
+    names.forEach(n => {
+      const c = byName.get(n);
+      if (!c) { missing++; return; }
+      out.push(c.find(t => t.folder === p.folder) || c[0]);
+    });
+    if (!out.length){ $('libStatus').textContent = `No tracks from “${p.title}” were found in the selected folder.`; return; }
+    $('libStatus').textContent = `Playing “${p.title}”` + (missing ? ` (${missing} entries not found in this folder)` : '');
+    setQueue(out, 0, p.title);
+  } catch(e){ $('libStatus').textContent = 'Could not load playlist: ' + e.message; }
+}
+function parsePlaylist(text, filename){
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  let entries;
+  if (/\.pls$/i.test(filename)) entries = lines.filter(l => /^file\d+=/i.test(l)).map(l => l.replace(/^file\d+=/i, ''));
+  else entries = lines.filter(l => !l.startsWith('#'));
+  return entries.map(e => {
+    let n = e.split(/[\\/]/).pop();
+    try { n = decodeURIComponent(n); } catch(_){}
+    return n.toLowerCase();
+  });
+}
+
+/* ---------- Player ---------- */
+const audio = $('audio');
+let queue = [], qi = -1, shuffle = false, repeat = 0, queueName = '', retried = false;
+const fmt = s => isFinite(s) ? Math.floor(s/60) + ':' + String(Math.floor(s%60)).padStart(2,'0') : '0:00';
+
+function setQueue(tracks, startIndex, name){
+  queue = tracks.slice(); queueName = name || ''; $('player').classList.remove('hidden');
+  playAt(Math.max(0, startIndex));
+}
+async function playAt(i, resumeAt){
+  if (i < 0 || i >= queue.length) return;
+  qi = i; const t = queue[i];
+  if (!resumeAt) retried = false;
+  showNow(t); markPlaying();
+  try { if (stale(t)) await refreshUrl(t); }
+  catch(e){ $('libStatus').textContent = 'Could not get a link for this track: ' + e.message; return; }
+  audio.src = t.url;
+  if (resumeAt) audio.addEventListener('loadedmetadata', () => { audio.currentTime = resumeAt; }, { once: true });
+  audio.play().catch(()=>{});
+}
+function next(auto){
+  if (!queue.length) return;
+  if (repeat === 2 && auto) return playAt(qi);
+  if (shuffle && queue.length > 1){ let j; do { j = Math.floor(Math.random() * queue.length); } while (j === qi); return playAt(j); }
+  if (qi + 1 < queue.length) return playAt(qi + 1);
+  if (repeat === 1 || !auto) return playAt(0);
+  audio.pause();
+}
+function prev(){ if (audio.currentTime > 3) audio.currentTime = 0; else playAt(qi > 0 ? qi - 1 : 0); }
+function stopPlayback(){ audio.pause(); audio.removeAttribute('src'); queue = []; qi = -1; }
+
+function showNow(t){
+  $('nowTitle').textContent = t.title; $('nowSub').textContent = `${t.folder.split('/').pop() || ''}${queueName && queueName !== t.folder.split('/').pop() ? ' · ' + queueName : ''}`;
+  const f = lib.folders.get(t.folder), c = f && coverOf(f);
+  $('nowCover').outerHTML = imgTag(c, 'cover', 'nowCover');
+  if ('mediaSession' in navigator){
+    navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.folder.split('/').pop() || 'Cloud Jukebox', album: queueName,
+      artwork: c ? [{ src: c.url }] : [] });
+  }
+}
+function markPlaying(){
+  document.querySelectorAll('.track.playing').forEach(b => b.classList.remove('playing'));
+  const t = queue[qi]; if (!t) return;
+  document.querySelectorAll(`.track[data-id="${CSS.escape(t.id)}"]`).forEach(b => b.classList.add('playing'));
+}
+function syncToggles(){
+  $('bShuffle').classList.toggle('on', shuffle);
+  $('bRepeat').classList.toggle('on', repeat > 0);
+  $('bRepeat').textContent = repeat === 2 ? '⟲¹' : '⟳';
+  $('bRepeat').title = 'Repeat: ' + ['off','all','one'][repeat];
+}
+$('bShuffle').onclick = () => { shuffle = !shuffle; syncToggles(); };
+$('bRepeat').onclick = () => { repeat = (repeat + 1) % 3; syncToggles(); };
+$('bNext').onclick = () => next(false);
+$('bPrev').onclick = prev;
+$('bPlay').onclick = () => { if (!audio.src && queue.length) playAt(qi < 0 ? 0 : qi); else audio.paused ? audio.play() : audio.pause(); };
+audio.addEventListener('play',  () => { $('bPlay').textContent = '⏸'; });
+audio.addEventListener('pause', () => { $('bPlay').textContent = '▶'; });
+audio.addEventListener('ended', () => next(true));
+audio.addEventListener('timeupdate', () => {
+  if (!seeking && audio.duration) $('seek').value = (audio.currentTime / audio.duration) * 1000;
+  $('tCur').textContent = fmt(audio.currentTime); $('tDur').textContent = fmt(audio.duration);
+});
+let seeking = false;
+$('seek').addEventListener('input', () => { seeking = true; $('tCur').textContent = fmt($('seek').value / 1000 * audio.duration); });
+$('seek').addEventListener('change', () => { if (audio.duration) audio.currentTime = $('seek').value / 1000 * audio.duration; seeking = false; });
+audio.addEventListener('error', async () => {              // expired link: refresh and resume once
+  const t = queue[qi]; if (!t || retried) return; retried = true;
+  const pos = audio.currentTime || 0;
+  try { await refreshUrl(t); playAt(qi, pos); } catch(_){}
+});
+if ('mediaSession' in navigator){
+  navigator.mediaSession.setActionHandler('play', () => audio.play());
+  navigator.mediaSession.setActionHandler('pause', () => audio.pause());
+  navigator.mediaSession.setActionHandler('previoustrack', prev);
+  navigator.mediaSession.setActionHandler('nexttrack', () => next(false));
+}
+
+/* ---------- Boot ---------- */
+syncToggles();
+(function boot(){
+  const saved = CONFIG.shareUrl || store.get('shareUrl');
+  if (saved) startWith(saved); else openStart();
+})();
+</script>
+</body>
+</html>
