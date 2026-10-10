@@ -6,6 +6,7 @@
 <title>Cloud Jukebox</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -80,18 +81,25 @@ details.album summary::-webkit-details-marker{display:none}
 <body>
 <header>
   <h1>Cloud Jukebox</h1>
+  <div><span class="who" id="who"></span><button class="btn small hidden" id="signOut">Sign out</button></div>
   </header>
 
 <main>
-  <!-- Start: paste share link -->
-  <section id="vStart" class="hero hidden">
+  <!-- Signed out -->
+  <section id="vSignedOut" class="hero hidden">
     <h2>Your OneDrive music, played properly.</h2>
-    <p>Paste a OneDrive share link to your music folder (set to “Anyone with the link can view”). No sign-in needed.</p>
-    <div class="bar">
-      <input type="url" id="linkInput" placeholder="https://1drv.ms/f/... or onedrive.live.com link" aria-label="OneDrive share link" style="flex:1;min-width:200px;background:var(--surface-solid);border:1px solid var(--line);color:var(--text);padding:10px 16px;border-radius:999px;font:inherit">
-      <button class="btn primary" id="loadLink">Load music</button>
-    </div>
-    <div class="status err" id="startMsg"></div>
+    <p>Sign in with your Microsoft account, pick a folder, and play every MP3 and playlist inside it. Your files stay in OneDrive.</p>
+    <button class="btn primary" id="signIn">Sign in with Microsoft</button>
+    <div class="status err" id="cfgWarn"></div>
+  </section>
+
+  <!-- Folder picker -->
+  <section id="vPicker" class="hidden">
+    <h2 style="margin:6px 0 4px">Choose your music folder</h2>
+    <div class="crumbs" id="crumbs"></div>
+    <div class="bar"><button class="btn primary" id="useFolder">Use this folder</button></div>
+    <div class="status" id="pickStatus"></div>
+    <ul class="list" id="folderList"></ul>
   </section>
 
   <!-- Library -->
@@ -99,7 +107,7 @@ details.album summary::-webkit-details-marker{display:none}
     <div class="bar">
       <input type="search" id="search" placeholder="Search tracks and folders" aria-label="Search">
       <button class="btn small" id="shuffleAll">Shuffle all</button>
-      <button class="btn small" id="changeFolder">Change link</button>
+      <button class="btn small" id="changeFolder">Change folder</button>
       <button class="btn small" id="rescan">Rescan</button>
     </div>
     <div class="status" id="libStatus"></div>
@@ -124,14 +132,15 @@ details.album summary::-webkit-details-marker{display:none}
 </div>
 
 <script>
-/* ================= CONFIG ================= */
+/* ================= CONFIG — edit this ================= */
 const CONFIG = {
-  shareUrl: ''   // optional: hard-code your share link. Leave empty to paste it in the page
-                 // (note: anything in a public GitHub repo is public, including this link)
+  clientId: 'YOUR_CLIENT_ID_HERE',   // Application (client) ID from your app registration
+  authority: 'https://login.microsoftonline.com/consumers', // personal Microsoft accounts
+  scopes: ['Files.Read', 'User.Read']
 };
-/* ========================================== */
+/* ====================================================== */
 
-const API = 'https://api.onedrive.com/v1.0';
+const GRAPH = 'https://graph.microsoft.com/v1.0';
 const AUDIO_RE = /\.(mp3|m4a|aac|ogg|wav|flac)$/i;
 const LIST_RE  = /\.(m3u8?|pls)$/i;
 const IMG_RE   = /\.(jpe?g|png|gif|webp)$/i;
@@ -143,87 +152,113 @@ const store = {
   set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 };
 
-/* ---------- Share-link access (anonymous) ---------- */
-let sid = '', mode = 0;   // mode 0 = address children by item id, 1 = by path (auto-switches if one fails)
-const shareId = url => 'u!' + btoa(unescape(encodeURIComponent(url.trim()))).replace(/=+$/,'').replace(/\//g,'_').replace(/\+/g,'-');
-const encPath = p => p.split('/').map(encodeURIComponent).join('/');
-const dl = it => it['@content.downloadUrl'] || it['@microsoft.graph.downloadUrl'] || '';
+/* ---------- Auth ---------- */
+let msalApp, account = null;
 
-async function jget(url){
-  for (let i = 0; i < 4; i++){
-    let res;
-    try { res = await fetch(url); }
-    catch(e){ throw new Error('browser could not reach OneDrive (blocked or offline)'); }
-    if (res.status === 429 || res.status === 503){ await sleep((parseInt(res.headers.get('Retry-After')) || 2 ** i) * 1000); continue; }
-    if (!res.ok) throw new Error('OneDrive returned ' + res.status);
+async function initAuth(){
+  if (CONFIG.clientId.startsWith('YOUR_')) {
+    show('vSignedOut'); $('cfgWarn').textContent = 'Set your clientId in index.html before signing in.'; return;
+  }
+  msalApp = new msal.PublicClientApplication({
+    auth: { clientId: CONFIG.clientId, authority: CONFIG.authority, redirectUri: location.origin + location.pathname },
+    cache: { cacheLocation: 'localStorage' }
+  });
+  if (msalApp.initialize) await msalApp.initialize();
+  try { await msalApp.handleRedirectPromise(); } catch(e){}
+  account = msalApp.getActiveAccount() || msalApp.getAllAccounts()[0] || null;
+  if (account) onSignedIn(); else show('vSignedOut');
+}
+async function signIn(){
+  try {
+    const r = await msalApp.loginPopup({ scopes: CONFIG.scopes, prompt: 'select_account' });
+    account = r.account; onSignedIn();
+  } catch(e){ $('cfgWarn').textContent = 'Sign-in failed: ' + (e.message || e); }
+}
+function signOut(){
+  stopPlayback();
+  msalApp.logoutPopup({ account }).catch(()=>{}).finally(()=>{
+    account = null; $('who').textContent=''; $('signOut').classList.add('hidden'); $('player').classList.add('hidden'); show('vSignedOut');
+  });
+}
+async function getToken(){
+  const req = { scopes: CONFIG.scopes, account };
+  try { return (await msalApp.acquireTokenSilent(req)).accessToken; }
+  catch(e){ return (await msalApp.acquireTokenPopup(req)).accessToken; }
+}
+function onSignedIn(){
+  msalApp.setActiveAccount(account);
+  $('who').textContent = account.username || account.name || '';
+  $('signOut').classList.remove('hidden');
+  const saved = store.get('root');
+  if (saved) scan(saved.id, saved.name); else openPicker();
+}
+
+/* ---------- Graph helpers ---------- */
+const itemPath = id => id === 'root' ? '/me/drive/root' : `/me/drive/items/${encodeURIComponent(id)}`;
+async function gfetch(pathOrUrl, tries = 4){
+  const url = pathOrUrl.startsWith('http') ? pathOrUrl : GRAPH + pathOrUrl;
+  for (let i = 0; i < tries; i++){
+    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + await getToken() } });
+    if (res.status === 429 || res.status === 503){
+      await sleep((parseInt(res.headers.get('Retry-After')) || 2 ** i) * 1000); continue;
+    }
+    if (!res.ok) throw new Error(`Graph ${res.status}`);
     return res.json();
   }
-  throw new Error('OneDrive is busy, try again shortly');
+  throw new Error('Graph is busy, try again shortly');
 }
-function childUrls(f){
-  const q = '?$top=200';
-  const byId   = f.id   ? `${API}/shares/${sid}/driveItem/items/${f.id}/children${q}` : `${API}/shares/${sid}/driveItem/children${q}`;
-  const byPath = f.path ? `${API}/shares/${sid}/root:/${encPath(f.path)}:/children${q}` : `${API}/shares/${sid}/root/children${q}`;
-  return mode === 1 ? [byPath, byId] : [byId, byPath];
-}
-async function listChildren(f, cb){
-  const urls = childUrls(f); let d, err;
-  for (let k = 0; k < urls.length; k++){
-    try { d = await jget(urls[k]); if (k === 1) mode = 1 - mode; break; } catch(e){ err = e; }
-  }
-  if (!d) throw err;
-  while (d){
+async function listChildren(id, cb){
+  let url = `${itemPath(id)}/children?$top=200`;
+  while (url){
+    const d = await gfetch(url);
     d.value.forEach(cb);
-    d = d['@odata.nextLink'] ? await jget(d['@odata.nextLink']) : null;
+    url = d['@odata.nextLink'] || null;
   }
 }
 async function refreshUrl(item){
-  for (const u of [`${API}/shares/${sid}/driveItem/items/${item.id}`, `${API}/shares/${sid}/root:/${encPath(item.path)}`]){
-    try { const d = await jget(u); const x = dl(d); if (x){ item.url = x; item.urlAt = Date.now(); return x; } } catch(e){}
-  }
-  item.url = `${API}/shares/${sid}/driveItem/items/${item.id}/content`;   // redirecting fallback link
-  item.urlAt = Date.now();
+  const d = await gfetch(itemPath(item.id));
+  item.url = d['@microsoft.graph.downloadUrl']; item.urlAt = Date.now();
   return item.url;
 }
 const stale = item => !item.url || Date.now() - (item.urlAt || 0) > 25 * 60 * 1000;
 
 /* ---------- Views ---------- */
-function show(id){ ['vStart','vLibrary'].forEach(v => $(v).classList.toggle('hidden', v !== id)); }
-function openStart(msg){
-  stopPlayback(); $('player').classList.add('hidden');
-  $('linkInput').value = store.get('shareUrl') || '';
-  $('startMsg').textContent = msg || ''; show('vStart');
+function show(id){ ['vSignedOut','vPicker','vLibrary'].forEach(v => $(v).classList.toggle('hidden', v !== id)); }
+
+/* ---------- Folder picker ---------- */
+let pickStack = [{ id:'root', name:'OneDrive' }];
+function openPicker(){ show('vPicker'); pickStack = [{ id:'root', name:'OneDrive' }]; loadPicker(); }
+async function loadPicker(){
+  const cur = pickStack[pickStack.length - 1];
+  $('crumbs').innerHTML = pickStack.map((c,i) => `<button data-i="${i}">${esc(c.name)}</button>`).join(' / ');
+  $('pickStatus').textContent = 'Loading folders…'; $('folderList').innerHTML = '';
+  const folders = [];
+  try { await listChildren(cur.id, it => { if (it.folder) folders.push(it); }); }
+  catch(e){ $('pickStatus').textContent = 'Could not load folders: ' + e.message; return; }
+  folders.sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric:true}));
+  $('pickStatus').textContent = folders.length ? '' : 'No subfolders here.';
+  $('folderList').innerHTML = folders.map(f =>
+    `<li><button class="row" data-id="${esc(f.id)}" data-name="${esc(f.name)}"><span class="cover" style="width:36px;height:36px;font-size:1rem">▸</span><span class="meta"><b>${esc(f.name)}</b><span>${f.folder.childCount} items</span></span></button></li>`).join('');
 }
-async function startWith(url){
-  url = (url || '').trim();
-  if (!/^https?:\/\//i.test(url)){ $('startMsg').textContent = 'Paste a full link that starts with https://'; return; }
-  store.set('shareUrl', url);
-  $('linkInput').value = url; $('startMsg').textContent = 'Checking link…'; show('vStart');
-  const variants = [url]; const bare = url.split('?')[0]; if (bare !== url) variants.push(bare);
-  let err = null, ok = false;
-  for (const v of variants){
-    sid = shareId(v);
-    for (const p of ['driveItem', 'root']){
-      try { await jget(`${API}/shares/${sid}/${p}`); ok = true; break; } catch(e){ err = e; }
-    }
-    if (ok) break;
-  }
-  if (!ok){
-    $('startMsg').textContent = 'Could not open that link (' + (err ? err.message : 'unknown error') + '). Try opening the link in your browser, then paste the long address from the address bar instead.';
-    return;
-  }
-  mode = 0; scan(url);
-}
-$('loadLink').addEventListener('click', () => startWith($('linkInput').value));
-$('linkInput').addEventListener('keydown', e => { if (e.key === 'Enter') startWith($('linkInput').value); });
+$('crumbs').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  pickStack = pickStack.slice(0, +b.dataset.i + 1); loadPicker();
+});
+$('folderList').addEventListener('click', e => {
+  const b = e.target.closest('.row'); if (!b) return;
+  pickStack.push({ id: b.dataset.id, name: b.dataset.name }); loadPicker();
+});
+$('useFolder').addEventListener('click', () => {
+  const cur = pickStack[pickStack.length - 1];
+  store.set('root', cur); scan(cur.id, cur.name);
+});
 
 /* ---------- Library scan ---------- */
 let lib = { folders: new Map(), playlists: [], tracks: new Map() };
-async function scan(url){
-  const rootName = 'Shared folder';
+async function scan(rootId, rootName){
   show('vLibrary'); $('libraryBody').innerHTML = '';
   lib = { folders: new Map(), playlists: [], tracks: new Map() };
-  const queue = [{ id: null, path: '' }]; let rootFailed = false;
+  const queue = [{ id: rootId, path: '' }]; let rootFailed = false;
   let active = 0, foldersDone = 0;
   const setMsg = () => { $('libStatus').textContent = `Scanning ${rootName}… ${foldersDone} folders, ${lib.tracks.size} tracks`; };
   setMsg();
@@ -238,7 +273,7 @@ async function scan(url){
         await listChildren(f.id, it => {
           if (it.folder){ queue.push({ id: it.id, path: f.path ? f.path + '/' + it.name : it.name }); return; }
           if (!it.file) return;
-          const base = { id: it.id, name: it.name, folder: f.path, path: f.path ? f.path + '/' + it.name : it.name, url: dl(it), urlAt: Date.now() };
+          const base = { id: it.id, name: it.name, folder: f.path, path: f.path ? f.path + '/' + it.name : it.name, url: it['@microsoft.graph.downloadUrl'], urlAt: Date.now() };
           if (AUDIO_RE.test(it.name)){
             const t = { ...base, title: it.name.replace(/\.[^.]+$/, '').replace(/_/g, ' ') };
             rec.tracks.push(t); lib.tracks.set(t.id, t);
@@ -253,7 +288,7 @@ async function scan(url){
     }
   };
   await Promise.all([worker(), worker(), worker(), worker()]);
-  if (rootFailed && !lib.tracks.size && !lib.playlists.length){ openStart('Could not open that link. It must be a personal OneDrive folder shared with “Anyone with the link can view”.'); return; }
+  if (rootFailed && !lib.tracks.size && !lib.playlists.length){ openPicker(); return; }
   const nat = (a,b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
   lib.folders.forEach(f => { f.tracks.sort(nat); f.images.sort(nat); });
   lib.playlists.sort(nat);
@@ -297,8 +332,8 @@ function renderLibrary(){
   markPlaying();
 }
 let st; $('search').addEventListener('input', () => { clearTimeout(st); st = setTimeout(renderLibrary, 150); });
-$('changeFolder').addEventListener('click', () => openStart());
-$('rescan').addEventListener('click', () => { const u = store.get('shareUrl'); if (u) startWith(u); });
+$('changeFolder').addEventListener('click', openPicker);
+$('rescan').addEventListener('click', () => { const r = store.get('root'); if (r) scan(r.id, r.name); });
 $('shuffleAll').addEventListener('click', () => { shuffle = true; syncToggles(); setQueue([...lib.tracks.values()], Math.floor(Math.random() * lib.tracks.size), 'All music'); });
 
 $('libraryBody').addEventListener('click', async e => {
@@ -317,7 +352,7 @@ async function playPlaylist(p){
     if (stale(p)) await refreshUrl(p);
     let text;
     try { text = await (await fetch(p.url)).text(); }
-    catch(_){ text = await (await fetch(`${API}/shares/${sid}/driveItem/items/${p.id}/content`)).text(); }
+    catch(_){ text = await (await fetch(`${GRAPH}${itemPath(p.id)}/content`, { headers: { Authorization: 'Bearer ' + await getToken() } })).text(); }
     const names = parsePlaylist(text, p.name);
     const byName = new Map();
     lib.tracks.forEach(t => { const k = t.name.toLowerCase(); (byName.get(k) || byName.set(k, []).get(k)).push(t); });
@@ -423,11 +458,10 @@ if ('mediaSession' in navigator){
 }
 
 /* ---------- Boot ---------- */
+$('signIn').addEventListener('click', signIn);
+$('signOut').addEventListener('click', signOut);
 syncToggles();
-(function boot(){
-  const saved = CONFIG.shareUrl || store.get('shareUrl');
-  if (saved) startWith(saved); else openStart();
-})();
+initAuth();
 </script>
 </body>
 </html>
