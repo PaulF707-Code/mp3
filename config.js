@@ -1,4 +1,4 @@
 // Your Microsoft app registration settings. Edit this file once; you can then replace index.html freely.
 window.APP_CONFIG = {
-  clientId: 'YOUR_CLIENT_ID_HERE'   // Application (client) ID from your Entra app registration
+  clientId: 'e416d4bf-af62-403b-902b-a1259a7a09c9'   // Application (client) ID from your Entra app registration
 };
