@@ -151,7 +151,9 @@ const dl = it => it['@content.downloadUrl'] || it['@microsoft.graph.downloadUrl'
 
 async function jget(url){
   for (let i = 0; i < 4; i++){
-    const res = await fetch(url);
+    let res;
+    try { res = await fetch(url); }
+    catch(e){ throw new Error('browser could not reach OneDrive (blocked or offline)'); }
     if (res.status === 429 || res.status === 503){ await sleep((parseInt(res.headers.get('Retry-After')) || 2 ** i) * 1000); continue; }
     if (!res.ok) throw new Error('OneDrive returned ' + res.status);
     return res.json();
@@ -192,11 +194,25 @@ function openStart(msg){
   $('linkInput').value = store.get('shareUrl') || '';
   $('startMsg').textContent = msg || ''; show('vStart');
 }
-function startWith(url){
+async function startWith(url){
   url = (url || '').trim();
   if (!/^https?:\/\//i.test(url)){ $('startMsg').textContent = 'Paste a full link that starts with https://'; return; }
-  store.set('shareUrl', url); sid = shareId(url); mode = 0;
-  scan(url);
+  store.set('shareUrl', url);
+  $('linkInput').value = url; $('startMsg').textContent = 'Checking link…'; show('vStart');
+  const variants = [url]; const bare = url.split('?')[0]; if (bare !== url) variants.push(bare);
+  let err = null, ok = false;
+  for (const v of variants){
+    sid = shareId(v);
+    for (const p of ['driveItem', 'root']){
+      try { await jget(`${API}/shares/${sid}/${p}`); ok = true; break; } catch(e){ err = e; }
+    }
+    if (ok) break;
+  }
+  if (!ok){
+    $('startMsg').textContent = 'Could not open that link (' + (err ? err.message : 'unknown error') + '). Try opening the link in your browser, then paste the long address from the address bar instead.';
+    return;
+  }
+  mode = 0; scan(url);
 }
 $('loadLink').addEventListener('click', () => startWith($('linkInput').value));
 $('linkInput').addEventListener('keydown', e => { if (e.key === 'Enter') startWith($('linkInput').value); });
