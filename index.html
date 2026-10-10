@@ -6,7 +6,6 @@
 <title>Cloud Jukebox</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -131,14 +130,14 @@ details.album summary::-webkit-details-marker{display:none}
   <audio id="audio" preload="auto"></audio>
 </div>
 
+<script src="config.js"></script>
 <script>
-/* ================= CONFIG — edit this ================= */
-const CONFIG = {
-  clientId: 'e416d4bf-af62-403b-902b-a1259a7a09c9',   // Application (client) ID from your app registration
-  authority: 'https://login.microsoftonline.com/consumers', // personal Microsoft accounts
+/* Settings come from config.js (edit that file, not this one) */
+const CONFIG = Object.assign({
+  clientId: 'YOUR_CLIENT_ID_HERE',
+  authority: 'https://login.microsoftonline.com/consumers',
   scopes: ['Files.Read', 'User.Read']
-};
-/* ====================================================== */
+}, window.APP_CONFIG || {});
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 const AUDIO_RE = /\.(mp3|m4a|aac|ogg|wav|flac)$/i;
@@ -155,11 +154,28 @@ const store = {
 /* ---------- Auth ---------- */
 let msalApp, account = null;
 
+const MSAL_SOURCES = [
+  './msal-browser.min.js',   // optional: upload this file to your repo as a last-resort local copy
+  'https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js',
+  'https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/dist/msal-browser.min.js',
+  'https://unpkg.com/@azure/msal-browser@2.38.3/dist/msal-browser.min.js'
+];
+async function loadMsal(){
+  for (const src of MSAL_SOURCES){
+    if (typeof msal !== 'undefined') return true;
+    await new Promise(res => {
+      const t = document.createElement('script');
+      t.src = src; t.onload = res; t.onerror = res; document.head.appendChild(t);
+    });
+    if (typeof msal !== 'undefined') return true;
+  }
+  return typeof msal !== 'undefined';
+}
 async function initAuth(){
   if (CONFIG.clientId.startsWith('YOUR_')) {
-    show('vSignedOut'); $('cfgWarn').textContent = 'Set your clientId in index.html before signing in.'; return;
+    show('vSignedOut'); $('cfgWarn').textContent = 'Set your clientId in config.js before signing in.'; return;
   }
-  if (typeof msal === 'undefined'){ show('vSignedOut'); $('cfgWarn').textContent = 'Microsoft sign-in library did not load. Check your connection or content blocker and reload.'; return; }
+  if (!(await loadMsal())){ show('vSignedOut'); $('cfgWarn').textContent = 'Microsoft sign-in library could not be loaded from any source. Turn off any content blocker, or add msal-browser.min.js to your repo (see instructions).'; return; }
   msalApp = new msal.PublicClientApplication({
     auth: { clientId: CONFIG.clientId, authority: CONFIG.authority, redirectUri: location.origin + location.pathname },
     cache: { cacheLocation: 'localStorage' }
@@ -171,7 +187,7 @@ async function initAuth(){
   if (account) onSignedIn(); else show('vSignedOut');
 }
 async function signIn(){
-  if (!msalApp){ $('cfgWarn').textContent = 'Sign-in is not set up: add your client ID in index.html.'; return; }
+  if (!msalApp){ $('cfgWarn').textContent = 'Sign-in is not set up: add your client ID in config.js.'; return; }
   try { await msalApp.loginRedirect({ scopes: CONFIG.scopes, prompt: 'select_account' }); }
   catch(e){ $('cfgWarn').textContent = 'Sign-in failed: ' + (e.errorMessage || e.message || e); }
 }
