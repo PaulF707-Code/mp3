@@ -151,59 +151,71 @@ const store = {
   set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 };
 
-/* ---------- Auth ---------- */
-let msalApp, account = null;
+/* ---------- Auth (OAuth 2.0 authorization code + PKCE, no library needed) ---------- */
+const REDIRECT = location.origin + location.pathname;
+const OAUTH = CONFIG.authority + '/oauth2/v2.0';
+const SCOPE = CONFIG.scopes.concat('offline_access').join(' ');
+const b64url = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/=+$/,'').replace(/\+/g,'-').replace(/\//g,'_');
+let tok = store.get('tok');   // { access, refresh, exp }
 
-const MSAL_SOURCES = [
-  './msal-browser.min.js',   // optional: upload this file to your repo as a last-resort local copy
-  'https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js',
-  'https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/dist/msal-browser.min.js',
-  'https://unpkg.com/@azure/msal-browser@2.38.3/dist/msal-browser.min.js'
-];
-async function loadMsal(){
-  for (const src of MSAL_SOURCES){
-    if (typeof msal !== 'undefined') return true;
-    await new Promise(res => {
-      const t = document.createElement('script');
-      t.src = src; t.onload = res; t.onerror = res; document.head.appendChild(t);
-    });
-    if (typeof msal !== 'undefined') return true;
-  }
-  return typeof msal !== 'undefined';
+async function tokenRequest(params){
+  const res = await fetch(OAUTH + '/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: CONFIG.clientId, scope: SCOPE, ...params })
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok || !d.access_token) throw new Error(d.error_description || d.error || ('token request failed (' + res.status + ')'));
+  tok = { access: d.access_token, refresh: d.refresh_token || (tok && tok.refresh), exp: Date.now() + (d.expires_in || 3600) * 1000 };
+  store.set('tok', tok);
 }
 async function initAuth(){
   if (CONFIG.clientId.startsWith('YOUR_')) {
     show('vSignedOut'); $('cfgWarn').textContent = 'Set your clientId in config.js before signing in.'; return;
   }
-  if (!(await loadMsal())){ show('vSignedOut'); $('cfgWarn').textContent = 'Microsoft sign-in library could not be loaded from any source. Turn off any content blocker, or add msal-browser.min.js to your repo (see instructions).'; return; }
-  msalApp = new msal.PublicClientApplication({
-    auth: { clientId: CONFIG.clientId, authority: CONFIG.authority, redirectUri: location.origin + location.pathname },
-    cache: { cacheLocation: 'localStorage' }
-  });
-  if (msalApp.initialize) await msalApp.initialize();
-  try { const r = await msalApp.handleRedirectPromise(); if (r && r.account) msalApp.setActiveAccount(r.account); }
-  catch(e){ show('vSignedOut'); $('cfgWarn').textContent = 'Sign-in error: ' + (e.errorMessage || e.message || e); return; }
-  account = msalApp.getActiveAccount() || msalApp.getAllAccounts()[0] || null;
-  if (account) onSignedIn(); else show('vSignedOut');
+  const p = new URLSearchParams(location.search);
+  if (p.get('error')){
+    history.replaceState({}, '', REDIRECT);
+    show('vSignedOut'); $('cfgWarn').textContent = 'Sign-in error: ' + (p.get('error_description') || p.get('error')); return;
+  }
+  if (p.get('code')){
+    const verifier = sessionStorage.getItem('pkce_verifier'), state = sessionStorage.getItem('pkce_state');
+    history.replaceState({}, '', REDIRECT);
+    try {
+      if (!verifier || p.get('state') !== state) throw new Error('sign-in session mismatch, please try again');
+      await tokenRequest({ grant_type: 'authorization_code', code: p.get('code'), redirect_uri: REDIRECT, code_verifier: verifier });
+    } catch(e){ show('vSignedOut'); $('cfgWarn').textContent = 'Sign-in failed: ' + e.message; return; }
+  }
+  if (tok) onSignedIn(); else show('vSignedOut');
 }
 async function signIn(){
-  if (!msalApp){ $('cfgWarn').textContent = 'Sign-in is not set up: add your client ID in config.js.'; return; }
-  try { await msalApp.loginRedirect({ scopes: CONFIG.scopes, prompt: 'select_account' }); }
-  catch(e){ $('cfgWarn').textContent = 'Sign-in failed: ' + (e.errorMessage || e.message || e); }
+  if (CONFIG.clientId.startsWith('YOUR_')){ $('cfgWarn').textContent = 'Sign-in is not set up: add your client ID in config.js.'; return; }
+  try {
+    const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+    const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+    const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
+    sessionStorage.setItem('pkce_verifier', verifier); sessionStorage.setItem('pkce_state', state);
+    location.href = OAUTH + '/authorize?' + new URLSearchParams({
+      client_id: CONFIG.clientId, response_type: 'code', redirect_uri: REDIRECT, response_mode: 'query',
+      scope: SCOPE, state, code_challenge: challenge, code_challenge_method: 'S256', prompt: 'select_account'
+    });
+  } catch(e){ $('cfgWarn').textContent = 'Sign-in failed: ' + e.message; }
 }
 function signOut(){
-  stopPlayback(); store.set('root', null);
-  msalApp.logoutRedirect({ account, postLogoutRedirectUri: location.origin + location.pathname });
+  stopPlayback(); tok = null; store.set('tok', null); store.set('root', null);
+  $('who').textContent = ''; $('signOut').classList.add('hidden'); $('player').classList.add('hidden'); show('vSignedOut');
 }
 async function getToken(){
-  const req = { scopes: CONFIG.scopes, account };
-  try { return (await msalApp.acquireTokenSilent(req)).accessToken; }
-  catch(e){ await msalApp.acquireTokenRedirect(req); throw e; }
+  if (tok && tok.exp > Date.now() + 60000) return tok.access;
+  if (tok && tok.refresh){
+    try { await tokenRequest({ grant_type: 'refresh_token', refresh_token: tok.refresh }); return tok.access; } catch(e){}
+  }
+  signOut(); $('cfgWarn').textContent = 'Your session expired. Please sign in again.';
+  throw new Error('session expired');
 }
 function onSignedIn(){
-  msalApp.setActiveAccount(account);
-  $('who').textContent = account.username || account.name || '';
   $('signOut').classList.remove('hidden');
+  gfetch('/me').then(d => { $('who').textContent = d.userPrincipalName || d.displayName || ''; }).catch(() => {});
   const saved = store.get('root');
   if (saved) scan(saved.id, saved.name); else openPicker();
 }
