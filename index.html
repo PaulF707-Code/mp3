@@ -134,7 +134,7 @@ details.album summary::-webkit-details-marker{display:none}
 <script>
 /* ================= CONFIG — edit this ================= */
 const CONFIG = {
-  clientId: 'e416d4bf-af62-403b-902b-a1259a7a09c9',   // Application (client) ID from your app registration
+  clientId: 'YOUR_CLIENT_ID_HERE',   // Application (client) ID from your app registration
   authority: 'https://login.microsoftonline.com/consumers', // personal Microsoft accounts
   scopes: ['Files.Read', 'User.Read']
 };
@@ -159,31 +159,30 @@ async function initAuth(){
   if (CONFIG.clientId.startsWith('YOUR_')) {
     show('vSignedOut'); $('cfgWarn').textContent = 'Set your clientId in index.html before signing in.'; return;
   }
+  if (typeof msal === 'undefined'){ show('vSignedOut'); $('cfgWarn').textContent = 'Microsoft sign-in library did not load. Check your connection or content blocker and reload.'; return; }
   msalApp = new msal.PublicClientApplication({
     auth: { clientId: CONFIG.clientId, authority: CONFIG.authority, redirectUri: location.origin + location.pathname },
     cache: { cacheLocation: 'localStorage' }
   });
   if (msalApp.initialize) await msalApp.initialize();
-  try { await msalApp.handleRedirectPromise(); } catch(e){}
+  try { const r = await msalApp.handleRedirectPromise(); if (r && r.account) msalApp.setActiveAccount(r.account); }
+  catch(e){ show('vSignedOut'); $('cfgWarn').textContent = 'Sign-in error: ' + (e.errorMessage || e.message || e); return; }
   account = msalApp.getActiveAccount() || msalApp.getAllAccounts()[0] || null;
   if (account) onSignedIn(); else show('vSignedOut');
 }
 async function signIn(){
-  try {
-    const r = await msalApp.loginPopup({ scopes: CONFIG.scopes, prompt: 'select_account' });
-    account = r.account; onSignedIn();
-  } catch(e){ $('cfgWarn').textContent = 'Sign-in failed: ' + (e.message || e); }
+  if (!msalApp){ $('cfgWarn').textContent = 'Sign-in is not set up: add your client ID in index.html.'; return; }
+  try { await msalApp.loginRedirect({ scopes: CONFIG.scopes, prompt: 'select_account' }); }
+  catch(e){ $('cfgWarn').textContent = 'Sign-in failed: ' + (e.errorMessage || e.message || e); }
 }
 function signOut(){
-  stopPlayback();
-  msalApp.logoutPopup({ account }).catch(()=>{}).finally(()=>{
-    account = null; $('who').textContent=''; $('signOut').classList.add('hidden'); $('player').classList.add('hidden'); show('vSignedOut');
-  });
+  stopPlayback(); store.set('root', null);
+  msalApp.logoutRedirect({ account, postLogoutRedirectUri: location.origin + location.pathname });
 }
 async function getToken(){
   const req = { scopes: CONFIG.scopes, account };
   try { return (await msalApp.acquireTokenSilent(req)).accessToken; }
-  catch(e){ return (await msalApp.acquireTokenPopup(req)).accessToken; }
+  catch(e){ await msalApp.acquireTokenRedirect(req); throw e; }
 }
 function onSignedIn(){
   msalApp.setActiveAccount(account);
