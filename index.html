@@ -138,7 +138,7 @@ details.album summary::-webkit-details-marker{display:none}
 const CONFIG = Object.assign({
   clientId: 'YOUR_CLIENT_ID_HERE',
   authority: 'https://login.microsoftonline.com/consumers',
-  scopes: ['Files.Read', 'User.Read']
+  scopes: ['Files.ReadWrite', 'User.Read']
 }, window.APP_CONFIG || {});
 
 /* ---------- Colour themes ---------- */
@@ -166,7 +166,8 @@ const REDIRECT = location.origin + location.pathname;
 const OAUTH = CONFIG.authority + '/oauth2/v2.0';
 const SCOPE = CONFIG.scopes.concat('offline_access').join(' ');
 const b64url = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/=+$/,'').replace(/\+/g,'-').replace(/\//g,'_');
-let tok = store.get('tok');   // { access, refresh, exp }
+let tok = store.get('tok');   // { access, refresh, exp, sv }
+if (tok && tok.sv !== SCOPE) tok = null;   // permissions changed: require a fresh sign-in
 
 async function tokenRequest(params){
   const res = await fetch(OAUTH + '/token', {
@@ -176,7 +177,7 @@ async function tokenRequest(params){
   });
   const d = await res.json().catch(() => ({}));
   if (!res.ok || !d.access_token) throw new Error(d.error_description || d.error || ('token request failed (' + res.status + ')'));
-  tok = { access: d.access_token, refresh: d.refresh_token || (tok && tok.refresh), exp: Date.now() + (d.expires_in || 3600) * 1000 };
+  tok = { access: d.access_token, refresh: d.refresh_token || (tok && tok.refresh), exp: Date.now() + (d.expires_in || 3600) * 1000, sv: SCOPE };
   store.set('tok', tok);
 }
 async function initAuth(){
@@ -227,7 +228,7 @@ function onSignedIn(){
   $('signOut').classList.remove('hidden');
   gfetch('/me').then(d => { $('who').textContent = d.userPrincipalName || d.displayName || ''; }).catch(() => {});
   const saved = store.get('root');
-  if (saved) scan(saved.id, saved.name); else openPicker();
+  if (saved) openLibrary(saved.id, saved.name, false); else openPicker();
 }
 
 /* ---------- Graph helpers ---------- */
@@ -287,7 +288,7 @@ $('folderList').addEventListener('click', e => {
 });
 $('useFolder').addEventListener('click', () => {
   const cur = pickStack[pickStack.length - 1];
-  store.set('root', cur); scan(cur.id, cur.name);
+  store.set('root', cur); openLibrary(cur.id, cur.name, false);
 });
 
 /* ---------- Library scan ---------- */
@@ -329,8 +330,64 @@ async function scan(rootId, rootName){
   const nat = (a,b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
   lib.folders.forEach(f => { f.tracks.sort(nat); f.images.sort(nat); });
   lib.playlists.sort(nat);
-  $('libStatus').textContent = `${lib.tracks.size} tracks · ${lib.playlists.length} playlists · ${[...lib.folders.values()].filter(f=>f.tracks.length).length} folders`;
+  lib.at = Date.now();
+  $('libStatus').textContent = libSummary() + ' · saving index…';
   renderLibrary();
+  try { await saveIndex(rootId); $('libStatus').textContent = libSummary() + ' · index saved to OneDrive'; }
+  catch(e){ $('libStatus').textContent = libSummary() + ' · could not save index (' + e.message + ')'; }
+}
+
+/* ---------- Saved library index (stored in the chosen OneDrive folder) ---------- */
+const INDEX_NAME = 'mp3player-library.json';
+const libSummary = () => `${lib.tracks.size} tracks · ${lib.playlists.length} playlists · ${[...lib.folders.values()].filter(f=>f.tracks.length).length} folders`;
+
+async function openLibrary(id, name, force){
+  show('vLibrary'); $('libraryBody').innerHTML = '';
+  if (!force){
+    $('libStatus').textContent = 'Loading saved library…';
+    const data = await loadIndex(id);
+    if (data){
+      hydrate(data, name); renderLibrary();
+      $('libStatus').textContent = libSummary() + ' · saved ' + new Date(data.at).toLocaleString() + ' (use Rescan after adding music)';
+      return;
+    }
+  }
+  scan(id, name);
+}
+async function loadIndex(rootId){
+  try {
+    const meta = await gfetch(`${itemPath(rootId)}:/${INDEX_NAME}`);
+    let res;
+    try { res = await fetch(meta['@microsoft.graph.downloadUrl']); if (!res.ok) throw 0; }
+    catch(_){ res = await fetch(`${GRAPH}${itemPath(rootId)}:/${INDEX_NAME}:/content`, { headers: { Authorization: 'Bearer ' + await getToken() } }); }
+    const d = await res.json();
+    return (d && d.v === 1 && d.rootId === rootId) ? d : null;
+  } catch(e){ return null; }
+}
+function hydrate(d, rootName){
+  lib = { folders: new Map(), playlists: [], tracks: new Map(), at: d.at };
+  const mk = (path, [id, name]) => ({ id, name, folder: path, path: path ? path + '/' + name : name, url: '', urlAt: 0 });
+  d.f.forEach(([path, tracks, images]) => {
+    lib.folders.set(path, {
+      path, name: path ? path.split('/').pop() : rootName,
+      tracks: tracks.map(t => { const x = { ...mk(path, t), title: t[1].replace(/\.[^.]+$/, '').replace(/_/g, ' ') }; lib.tracks.set(x.id, x); return x; }),
+      images: images.map(i => mk(path, i))
+    });
+  });
+  lib.playlists = d.p.map(p => ({ ...mk(p[2], [p[0], p[1]]), title: p[1].replace(/\.[^.]+$/, '') }));
+}
+async function saveIndex(rootId){
+  const payload = {
+    v: 1, rootId, at: lib.at,
+    f: [...lib.folders.values()].map(f => [f.path, f.tracks.map(t => [t.id, t.name]), f.images.map(i => [i.id, i.name])]),
+    p: lib.playlists.map(p => [p.id, p.name, p.folder])
+  };
+  const body = JSON.stringify(payload);
+  if (body.length > 3.5e6) throw new Error('library too large to save');
+  const res = await fetch(`${GRAPH}${itemPath(rootId)}:/${INDEX_NAME}:/content`, {
+    method: 'PUT', headers: { Authorization: 'Bearer ' + await getToken(), 'Content-Type': 'application/json' }, body
+  });
+  if (!res.ok) throw new Error(res.status === 403 || res.status === 401 ? 'no write permission: sign out and sign in again' : 'OneDrive ' + res.status);
 }
 
 function coverOf(folder){
@@ -339,7 +396,7 @@ function coverOf(folder){
 }
 function imgTag(item, cls, id){
   if (!item) return `<div class="${cls}">♪</div>`;
-  return `<img class="${cls}" alt="" loading="lazy" ${id?`id="${id}"`:''} src="${esc(item.url)}" data-img="${esc(item.id)}">`;
+  return `<img class="${cls}" alt="" ${id?`id="${id}"`:''} ${item.url ? `src="${esc(item.url)}"` : ''} data-img="${esc(item.id)}">`;
 }
 document.addEventListener('error', async e => {           // refresh expired image links once
   const img = e.target; if (!(img instanceof HTMLImageElement) || !img.dataset.img || img.dataset.retry) return;
@@ -347,6 +404,13 @@ document.addEventListener('error', async e => {           // refresh expired ima
   const item = findImage(img.dataset.img); if (!item) return;
   try { img.src = await refreshUrl(item); } catch(_){}
 }, true);
+const lazyObs = new IntersectionObserver(entries => entries.forEach(e => {
+  if (!e.isIntersecting) return;
+  lazyObs.unobserve(e.target);
+  const img = e.target, it = findImage(img.dataset.img);
+  if (it) refreshUrl(it).then(u => { img.src = u; }).catch(() => {});
+}), { rootMargin: '300px' });
+function observeLazy(){ document.querySelectorAll('img[data-img]:not([src])').forEach(i => lazyObs.observe(i)); }
 function findImage(id){ for (const f of lib.folders.values()){ const i = f.images.find(x => x.id === id); if (i) return i; } return null; }
 
 function renderLibrary(){
@@ -366,11 +430,11 @@ function renderLibrary(){
   });
   if (!lib.tracks.size) html += '<p class="status">No audio files found in this folder. Try another folder.</p>';
   $('libraryBody').innerHTML = html;
-  markPlaying();
+  markPlaying(); observeLazy();
 }
 let st; $('search').addEventListener('input', () => { clearTimeout(st); st = setTimeout(renderLibrary, 150); });
 $('changeFolder').addEventListener('click', openPicker);
-$('rescan').addEventListener('click', () => { const r = store.get('root'); if (r) scan(r.id, r.name); });
+$('rescan').addEventListener('click', () => { const r = store.get('root'); if (r) openLibrary(r.id, r.name, true); });
 $('shuffleAll').addEventListener('click', () => { shuffle = true; syncToggles(); setQueue([...lib.tracks.values()], Math.floor(Math.random() * lib.tracks.size), 'All music'); });
 
 $('libraryBody').addEventListener('click', async e => {
@@ -451,9 +515,10 @@ function showNow(t){
   $('nowTitle').textContent = t.title; $('nowSub').textContent = `${t.folder.split('/').pop() || ''}${queueName && queueName !== t.folder.split('/').pop() ? ' · ' + queueName : ''}`;
   const f = lib.folders.get(t.folder), c = f && coverOf(f);
   $('nowCover').outerHTML = imgTag(c, 'cover', 'nowCover');
+  if (c && !c.url) refreshUrl(c).then(u => { const el = $('nowCover'); if (el && el.tagName === 'IMG') el.src = u; }).catch(() => {});
   if ('mediaSession' in navigator){
     navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.folder.split('/').pop() || 'MP3 Player', album: queueName,
-      artwork: c ? [{ src: c.url }] : [] });
+      artwork: c && c.url ? [{ src: c.url }] : [] });
   }
 }
 function markPlaying(){
