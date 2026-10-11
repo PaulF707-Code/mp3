@@ -309,7 +309,7 @@ async function gsend(path, method, body, contentType){
   return res.status === 204 ? null : res.json().catch(() => null);
 }
 async function listChildren(id, cb){
-  let url = `${itemPath(id)}/children?$top=200&$select=id,name,size,folder,file`;
+  let url = `${itemPath(id)}/children?$top=200&$select=id,name,size,folder,file,audio`;
   while (url){
     const d = await gfetch(url);
     d.value.forEach(cb);
@@ -431,12 +431,27 @@ const sel = new Map();   // selected groups / playlists for download
 let curGroups = [];
 
 const kindOf = name => AUDIO_RE.test(name) ? 't' : LIST_RE.test(name) ? 'p' : IMG_RE.test(name) ? 'i' : null;
+// OneDrive extracts tags from audio files itself and exposes them as the "audio" facet.
+function audioToTags(a){
+  if (!a) return null;
+  const o = {}, s = v => (v == null ? '' : String(v).trim());
+  if (s(a.title)) o.t = s(a.title);
+  if (s(a.artist)) o.a = s(a.artist);
+  if (s(a.albumArtist)) o.aa = s(a.albumArtist);
+  if (s(a.album)) o.al = s(a.album);
+  if (s(a.genre)) o.g = genreName(s(a.genre));
+  if (a.year > 0) o.y = String(a.year);
+  if (a.track > 0) o.n = a.track;
+  if (a.disc > 0) o.d = a.disc;
+  return (o.t || o.a || o.al) ? o : null;
+}
 function makeFile(it, pid, seed){
   const k = kindOf(it.name); if (!k) return null;
   const n = { id: it.id, pid, name: it.name, k, sz: it.size || 0, url: '', urlAt: 0 };
   if (k === 't'){
     n.title = it.name.replace(/\.[^.]+$/, '').replace(/_/g, ' ');
     if (seed && seed.tags && (!seed.sz || !it.size || seed.sz === it.size)) n.tags = seed.tags;   // keep tags unless the file changed
+    else { const ta = audioToTags(it.audio); if (ta) n.tags = ta; }
   }
   if (k === 'p') n.title = it.name.replace(/\.[^.]+$/, '');
   return n;
@@ -717,7 +732,7 @@ function readID3(b){
   if (flags & 0x80) data = deunsync(data);
   let pos = 0;
   if ((flags & 0x40) && ver >= 3) pos = ver === 4 ? sync7(data, 0) : 4 + be32(data, 0);
-  const frames = []; let need = 0; const hl = ver === 2 ? 6 : 10;
+  const frames = []; let need = 0, truncated = false; const hl = ver === 2 ? 6 : 10;
   while (pos + hl <= data.length){
     if (data[pos] === 0) break;
     const id = String.fromCharCode(data[pos], data[pos+1], data[pos+2], ver === 2 ? 0 : data[pos+3]).replace(/\0/g, '');
@@ -725,11 +740,11 @@ function readID3(b){
     if (ver === 2) sz = (data[pos+3] << 16) | (data[pos+4] << 8) | data[pos+5];
     else { sz = ver === 4 ? sync7(data, pos + 4) : be32(data, pos + 4); fl = (data[pos+8] << 8) | data[pos+9]; }
     const s = pos + hl, e = s + sz;
-    if (e > data.length){ if (WANT.has(id)) need = 10 + e; break; }
+    if (e > data.length){ if (WANT.has(id)) need = 10 + e; truncated = b.length < total; break; }
     frames.push({ id, fl, data: data.subarray(s, e) });
     pos = e;
   }
-  return { ver, flags, size, total, frames, need };
+  return { ver, flags, size, total, frames, need, truncated };
 }
 function genreName(v){
   let m = v.match(/^\((\d+)\)\s*(.*)$/);
@@ -797,22 +812,54 @@ function rewriteID3(bytes, ch){
 }
 /* ===ID3 END */
 
-async function readRange(t, start, end){
-  const url = await freshUrl(t);
-  let res;
-  try { res = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } }); }
-  catch(e){ throw new Error('the browser could not read the file contents'); }
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  const reader = res.body.getReader(), chunks = []; let total = 0;
-  while (total <= end - start){ const r = await reader.read(); if (r.done) break; chunks.push(r.value); total += r.value.length; }
-  reader.cancel().catch(() => {});
-  return concat(...chunks).subarray(0, end - start + 1);
+let tagStats = null, throttleUntil = 0;
+const newTagStats = () => ({ od: 0, file: 0, ms: 0, s200: 0, s206: 0, fail: 0, errors: new Map() });
+function noteErr(t, msg){
+  if (!tagStats) return;
+  tagStats.fail++;
+  const e = tagStats.errors.get(msg) || { n: 0, ex: [] }; e.n++; if (e.ex.length < 2) e.ex.push(t.name);
+  tagStats.errors.set(msg, e);
 }
+async function readRange(t, start, end){
+  let lastErr = null;
+  for (let attempt = 0; attempt < 4; attempt++){
+    const wait = throttleUntil - Date.now(); if (wait > 0) await sleep(wait);
+    let res;
+    try { res = await fetch(await freshUrl(t), { headers: { Range: `bytes=${start}-${end}` } }); }
+    catch(e){
+      if (/^Graph/.test(e.message)) throw e;
+      lastErr = new Error('network error or access blocked by the browser'); await sleep(300 * 2 ** attempt); continue;
+    }
+    if (res.status === 416) return new Uint8Array(0);                     // empty file
+    if (res.status === 429 || res.status === 503){
+      throttleUntil = Date.now() + (parseInt(res.headers.get('Retry-After')) || 2 ** attempt) * 1000;
+      lastErr = new Error('throttled by OneDrive (HTTP ' + res.status + ')'); continue;
+    }
+    if (res.status === 401 || res.status === 403){ t.url = ''; lastErr = new Error('download link rejected (HTTP ' + res.status + ')'); continue; }
+    if (!res.ok){
+      lastErr = new Error('HTTP ' + res.status);
+      if (res.status >= 500){ await sleep(300 * 2 ** attempt); continue; }
+      throw lastErr;
+    }
+    if (tagStats){ if (res.status === 206) tagStats.s206++; else tagStats.s200++; }
+    const reader = res.body.getReader(), chunks = []; let total = 0;
+    while (total <= end - start){ const r = await reader.read(); if (r.done) break; chunks.push(r.value); total += r.value.length; }
+    reader.cancel().catch(() => {});
+    return concat(...chunks).subarray(0, end - start + 1);
+  }
+  throw lastErr || new Error('failed');
+}
+// Reads only the start of the file (the ID3 tag). Never downloads the audio.
 async function readTags(t){
-  let buf = await readRange(t, 0, 16383);
+  let buf = await readRange(t, 0, 8191);
   let tag = readID3(buf);
-  if (tag && tag.need > buf.length){ buf = await readRange(t, 0, Math.min(tag.need, 1 << 20) - 1); tag = readID3(buf); }
-  t.tags = tag ? tagsFromFrames(tag) : {};
+  if (!tag){ t.tags = {}; return; }
+  let res = tagsFromFrames(tag);
+  if (tag.truncated && !(res.t && res.a && res.al)){        // e.g. big cover art stored before the text frames
+    const end = Math.min(tag.total, 1 << 20) - 1;
+    if (end >= buf.length){ buf = await readRange(t, 0, end); tag = readID3(buf); if (tag) res = tagsFromFrames(tag); }
+  }
+  t.tags = res;
 }
 async function writeTags(t, ch){
   const bytes = new Uint8Array(await (await fetchFile(t)).arrayBuffer());
@@ -828,11 +875,48 @@ async function writeTags(t, ch){
   t.tags = nt; t.url = ''; t.urlAt = 0;
 }
 
-let tagJob = null;
+let tagJob = null, lastTagReport = '';
 function refreshTagBtn(){ const b = document.querySelector('[data-d="tags"]'); if (b) b.textContent = tagJob ? 'Stop reading tags' : 'Read tags'; }
+function tagReport(st){
+  const parts = [`${st.od} from OneDrive’s own tag data`, `${st.file} from file headers` + (st.file ? ` (avg ${Math.round(st.ms / st.file)} ms each)` : '')];
+  if (st.s200) parts.push(`${st.s200} reads ignored the partial-read request`);
+  if (st.fail) parts.push(`${st.fail} failed: ` + [...st.errors].map(([m, e]) => `${m} ×${e.n} (e.g. ${e.ex.join(', ')})`).join('; '));
+  return parts.join(' · ');
+}
+// Stage 1: ask OneDrive for its own tag data, 20 files per request, without touching the files.
+async function fetchAudioFacets(list, job, st, got){
+  const groups = []; for (let i = 0; i < list.length; i += 20) groups.push(list.slice(i, i + 20));
+  let gi = 0, seen = 0;
+  const worker = async () => {
+    while (!job.stop){
+      const g = groups[gi++]; if (!g) return;
+      for (let attempt = 0; attempt < 3; attempt++){
+        try {
+          const r = await fetch(GRAPH + '/$batch', { method: 'POST',
+            headers: { Authorization: 'Bearer ' + await getToken(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requests: g.map((t, i) => ({ id: String(i), method: 'GET', url: `${itemPath(t.id)}?$select=id,audio` })) }) });
+          if (r.status === 429 || r.status === 503){ await sleep(2000 * (attempt + 1)); continue; }
+          if (r.ok) (await r.json()).responses.forEach(x => {
+            if (x.status !== 200 || !x.body) return;
+            const ta = audioToTags(x.body.audio);
+            if (ta){ const t = g[+x.id]; t.tags = ta; got.add(t.id); st.od++; }
+          });
+        } catch(e){}
+        break;
+      }
+      seen += g.length; setStatus(`Checking OneDrive’s tag data… ${seen}/${list.length}`);
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, worker));
+}
 async function readTagsList(list, job){
-  let done = 0, fail = 0, lastErr = '';
-  const chunks = []; for (let c = 0; c < list.length; c += 120) chunks.push(list.slice(c, c + 120));
+  const st = tagStats = newTagStats(), got = new Set();
+  await fetchAudioFacets(list, job, st, got);
+  // Stage 2: only .mp3 files OneDrive had no data for; read just the tag header of each.
+  const rest = [];
+  list.forEach(t => { if (got.has(t.id)) return; if (/\.mp3$/i.test(t.name)) rest.push(t); else if (!t.tags) t.tags = {}; });
+  let done = 0, lastErr = '';
+  const chunks = []; for (let c = 0; c < rest.length; c += 120) chunks.push(rest.slice(c, c + 120));
   let nextUrls = prefetchUrls(chunks[0] || []);
   for (let c = 0; c < chunks.length && !job.stop; c++){
     await nextUrls;
@@ -841,14 +925,17 @@ async function readTagsList(list, job){
     const worker = async () => {
       while (!job.stop){
         const t = chunk[k++]; if (!t) return;
-        try { await readTags(t); } catch(e){ fail++; lastErr = e.message; }
+        const t0 = performance.now();
+        try { await readTags(t); st.file++; st.ms += performance.now() - t0; }
+        catch(e){ lastErr = e.message; noteErr(t, e.message); }
         done++;
-        if (done % 5 === 0 || done === list.length) setStatus(`Reading tags ${done}/${list.length}…` + (fail ? ` (${fail} failed)` : ''));
+        if (done % 5 === 0 || done === rest.length) setStatus(`Reading file headers ${done}/${rest.length}…` + (st.fail ? ` (${st.fail} failed)` : ''));
       }
     };
-    await Promise.all(Array.from({ length: 12 }, worker));
+    await Promise.all(Array.from({ length: 8 }, worker));
   }
-  return { done, fail, lastErr };
+  lastTagReport = tagReport(st);
+  return { done, fail: st.fail, lastErr, od: st.od, rest: rest.length };
 }
 async function readAllTags(){
   if (tagJob){ tagJob.stop = true; return; }
@@ -861,9 +948,25 @@ async function readAllTags(){
   const r = await readTagsList(list, job);
   tagJob = null; refreshTagBtn();
   lib.at = Date.now(); renderLibrary();
-  if (r.fail && r.fail === r.done){ setStatus('Could not read tags: ' + r.lastErr); return; }
-  setStatus(libSummary() + (r.fail ? ` · ${r.fail} files failed (${r.lastErr})` : '') + ' · saving index…');
-  if (await saveIndexQuiet()) setStatus(libSummary() + ' · index saved');
+  if (r.rest && r.fail === r.rest && !r.od){ setStatus('Could not read tags: ' + r.lastErr); return; }
+  setStatus(libSummary() + ' · saving index…');
+  if (await saveIndexQuiet()) setStatus(libSummary() + ' · index saved. ' + lastTagReport);
+}
+// Read tags for just the tracks of an album/group as it is opened
+let lazyBusy = false, lazyTimer = null;
+async function lazyTags(d, g){
+  if (lazyBusy || tagJob || !tok) return;
+  const need = g.tracks.filter(t => !t.tags && !t.tagTried);
+  if (!need.length || need.length > 150) return;
+  lazyBusy = true;
+  try { await readTagsList(need, { stop: false }); } catch(e){}
+  lazyBusy = false;
+  need.forEach(t => { if (!t.tags) t.tagTried = true; });
+  setStatus(libSummary());
+  if (need.some(t => t.tags)){
+    if (d.isConnected){ d.dataset.filled = ''; fillTracks(d); }
+    clearTimeout(lazyTimer); lazyTimer = setTimeout(() => { lib.at = Date.now(); saveIndexQuiet(); }, 15000);
+  }
 }
 
 /* ---------- Grouping / sorting / rendering ---------- */
@@ -984,6 +1087,7 @@ function fillTracks(d){
       <button class="mini" data-act="editTags" data-id="${esc(t.id)}" title="Edit tags" aria-label="Edit tags">✎</button></div>`;
   }).join('');
   d.dataset.filled = '1'; markPlaying();
+  if (store.get('lazyTags') !== false) lazyTags(d, g);
 }
 $('libraryBody').addEventListener('toggle', e => { if (e.target.matches && e.target.matches('details.album') && e.target.open) fillTracks(e.target); }, true);
 
@@ -1389,7 +1493,9 @@ function openSettings(){
     h += `<div class="sgroup"><h3>Music folder</h3><p>${r ? esc(r.name) : 'None selected'}</p><div class="dbtns"><button class="btn small" data-d="folder">Change folder</button></div></div>`;
     h += `<div class="sgroup"><h3>Library</h3><p class="muted">${libSummary()}<br>Last updated: ${lib.at ? esc(new Date(lib.at).toLocaleString()) : 'never'}<br>Quick update: ${lib.delta ? 'ready' : 'needs one full rescan first'}</p>
       <div class="dbtns"><button class="btn small primary" data-d="quick" ${lib.delta ? '' : 'disabled'}>Update changes</button><button class="btn small" data-d="full">Full rescan</button><button class="btn small" data-d="tags">${tagJob ? 'Stop reading tags' : 'Read tags'}</button></div>
-      <label class="opt"><input type="checkbox" id="autoUp" ${store.get('autoUpdate') ? 'checked' : ''}><span>Check for changes when the app opens</span></label></div>`;
+      <label class="opt"><input type="checkbox" id="autoUp" ${store.get('autoUpdate') ? 'checked' : ''}><span>Check for changes when the app opens</span></label>
+      <label class="opt"><input type="checkbox" id="lazyUp" ${store.get('lazyTags') !== false ? 'checked' : ''}><span>Read tags for an album when I open it</span></label>
+      ${lastTagReport ? `<p class="muted">Last tag run: ${esc(lastTagReport)}</p>` : ''}</div>`;
   }
   h += `<div class="sgroup"><h3>Appearance</h3><div class="dbtns"><button class="btn small ${dark ? '' : 'primary'}" data-d="light">Light</button><button class="btn small ${dark ? 'primary' : ''}" data-d="dark">Dark</button></div></div>
     <div class="status" id="setMsg"></div><div class="dbtns"><button class="btn" data-d="close">Close</button></div>`;
@@ -1402,7 +1508,7 @@ function openSettings(){
     tags: () => readAllTags(),
     light: () => { setTheme('light'); openSettings(); },
     dark: () => { setTheme('dark'); openSettings(); },
-    change: e => { if (e.target.id === 'autoUp') store.set('autoUpdate', e.target.checked); }
+    change: e => { if (e.target.id === 'autoUp') store.set('autoUpdate', e.target.checked); if (e.target.id === 'lazyUp') store.set('lazyTags', e.target.checked); }
   });
 }
 
