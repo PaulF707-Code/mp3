@@ -71,6 +71,7 @@ details.album summary::-webkit-details-marker{display:none}
 .albhead{display:flex;align-items:center;gap:8px;margin:12px 0 2px;padding:4px 8px;border-bottom:1px solid var(--line);color:var(--muted);font-size:.88rem}
 .albhead b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-weight:600}
 .tracks.byalb .trk{padding-left:12px}
+.albhead span{flex:none;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .track{display:flex;width:100%;gap:10px;background:none;border:0;text-align:left;padding:7px 8px;border-radius:6px;align-items:baseline}
 .track:hover{background:var(--surface)}
 .track.playing{color:var(--accent)}
@@ -1383,7 +1384,11 @@ function buildGroups(q){
     });
     groups.sort((a, b) => /^Unknown/.test(a.name) - /^Unknown/.test(b.name) || cmpS(a.name, b.name));
   }
-  const cmp = trackCmp(sortBy, view);
+  let cmp = trackCmp(sortBy, view);
+  if ((view === 'genre' || view === 'year') && ['album', 'default'].includes(sortBy)){   // albums are shown as headings, so keep each artist's albums together
+    const alb = trackCmp('album', view);
+    cmp = (x, y) => cmpS(artistKey(x), artistKey(y)) || alb(x, y);
+  }
   groups.forEach(g => g.tracks.sort(cmp));
   if (q){
     groups = groups.map(g => {
@@ -1436,28 +1441,33 @@ function renderLibrary(){
   markPlaying(); observeLazy(); updateTagStatus(true);
   if (rightTab === 'playlists') renderRight();      // the playlist list depends on the library, so refresh it too (it was empty on first load)
 }
+const artistKey = t => { const a = tg(t); return a.aa || a.a || 'Unknown artist'; };
+// Identifies "the album a track sits under" in a view. In Artist view the artist is the group, so the album name is enough;
+// in Genre/Year views the artist is part of the key (two artists can both have a "Greatest Hits"). Lower-cased so case differences don't split an album.
+const albumKeyOf = (t, view) => { const al = tg(t).al || 'Unknown album'; return (view === 'artist' ? al : artistKey(t) + ' ¦ ' + al).toLowerCase(); };
 function fillTracks(d){
   if (d.dataset.filled) return;
   const g = curGroups[+d.dataset.gi]; if (!g) return;
   const view = $('viewSel').value;
-  // Artist view in album order (also the default order there): show each album as a heading between the artist and its tracks.
-  const byAlbum = view === 'artist' && ['album', 'default'].includes($('sortSel').value);
-  let prevAl = null, n = 0, html = '';
+  // Artist, Genre and Year views in album order (also their default order): show each album as a heading above its tracks.
+  const headed = ['artist', 'genre', 'year'].includes(view) && ['album', 'default'].includes($('sortSel').value);
+  let prev = null, n = 0, html = '';
   g.tracks.forEach(t => {
-    const a = tg(t), al = a.al || 'Unknown album';
-    if (byAlbum && al !== prevAl){
-      prevAl = al; n = 0;
-      html += `<div class="albhead"><b>${esc(al)}</b>${a.y ? `<span>${esc(a.y)}</span>` : ''}
-        <button class="mini" data-act="addAlbum" data-gi="${d.dataset.gi}" data-al="${esc(al)}" title="Add album to list" aria-label="Add album to list">＋</button>
-        <button class="btn small" data-act="playAlbum" data-gi="${d.dataset.gi}" data-al="${esc(al)}">Play</button></div>`;
+    const a = tg(t), key = headed ? albumKeyOf(t, view) : '';
+    if (headed && key !== prev){
+      prev = key; n = 0;
+      const sub = [view !== 'artist' ? artistKey(t) : '', view !== 'year' && a.y ? a.y : ''].filter(Boolean).join(' · ');
+      html += `<div class="albhead"><b>${esc(a.al || 'Unknown album')}</b>${sub ? `<span>${esc(sub)}</span>` : ''}
+        <button class="mini" data-act="addAlbum" data-gi="${d.dataset.gi}" data-key="${esc(key)}" title="Add album to list" aria-label="Add album to list">＋</button>
+        <button class="btn small" data-act="playAlbum" data-gi="${d.dataset.gi}" data-key="${esc(key)}">Play</button></div>`;
     }
     n++;
-    const who = view !== 'artist' && a.a ? `<em>${esc(a.a)}</em>` : '';
+    const who = !headed && view !== 'artist' && a.a ? `<em>${esc(a.a)}</em>` : '';
     html += `<div class="trk" draggable="true" data-drag="track" data-gi="${d.dataset.gi}" data-id="${esc(t.id)}"><button class="track" data-act="playTrack" data-gi="${d.dataset.gi}" data-id="${esc(t.id)}"><small>${a.n || n}</small><span>${esc(tTitle(t))}${who}</span></button>
       <button class="mini" data-act="addTo" data-id="${esc(t.id)}" title="Add to list" aria-label="Add to list">＋</button>
       <button class="mini" data-act="editTags" data-id="${esc(t.id)}" title="Edit tags" aria-label="Edit tags">✎</button></div>`;
   });
-  const box = d.querySelector('.tracks'); box.innerHTML = html; box.classList.toggle('byalb', byAlbum);
+  const box = d.querySelector('.tracks'); box.innerHTML = html; box.classList.toggle('byalb', headed);
   d.dataset.filled = '1'; markPlaying();
 }
 $('libraryBody').addEventListener('toggle', e => { if (e.target.matches && e.target.matches('details.album') && e.target.open) fillTracks(e.target); }, true);
@@ -1477,8 +1487,8 @@ $('libraryBody').addEventListener('click', e => {
   else if (act === 'playTrack') setQueue(g.tracks, g.tracks.findIndex(t => t.id === el.dataset.id), g.name);
   else if (act === 'addGroup') addToBuild(g.tracks.slice());
   else if (act === 'playAlbum' || act === 'addAlbum'){
-    const tr = g.tracks.filter(t => (tg(t).al || 'Unknown album') === el.dataset.al);
-    if (act === 'playAlbum') setQueue(tr, 0, el.dataset.al); else addToBuild(tr);
+    const view = $('viewSel').value, tr = g.tracks.filter(t => albumKeyOf(t, view) === el.dataset.key);
+    if (act === 'playAlbum') setQueue(tr, 0, tg(tr[0] || {}).al || 'Unknown album'); else addToBuild(tr);
   }
   else if (act === 'addTo') addToBuild([lib.tracks.get(el.dataset.id)]);
   else if (act === 'editTags') openTagEditor([lib.tracks.get(el.dataset.id)]);
