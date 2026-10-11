@@ -85,6 +85,7 @@ dialog{color:var(--text);background:var(--surface-solid);border:1px solid var(--
 dialog::backdrop{background:#000a}
 dialog h2{margin:0 0 6px;font-size:1.25rem}
 .muted{color:var(--muted);font-size:.9rem}
+.diag{white-space:pre-wrap;word-break:break-word;font-size:.78rem;line-height:1.35;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px;max-height:46vh;overflow:auto;user-select:text}
 .sgroup{border-top:1px solid var(--line);padding:10px 0 6px}
 .sgroup h3{margin:0 0 6px;font-size:1rem;color:var(--text)}
 .sgroup p{margin:4px 0}
@@ -823,7 +824,7 @@ function noteErr(t, msg){
 async function readRange(t, start, end){
   let lastErr = null;
   for (let attempt = 0; attempt < 4; attempt++){
-    const wait = throttleUntil - Date.now(); if (wait > 0) await sleep(wait);
+    const wait = Math.min(throttleUntil - Date.now(), 15000); if (wait > 0) await sleep(wait);
     let res;
     try { res = await fetch(await freshUrl(t), { headers: { Range: `bytes=${start}-${end}` } }); }
     catch(e){
@@ -884,29 +885,37 @@ function tagReport(st){
   return parts.join(' · ');
 }
 // Stage 1: ask OneDrive for its own tag data, 20 files per request, without touching the files.
+let facetOff = !!store.get('facetOff'), fileReadBlocked = '';
 async function fetchAudioFacets(list, job, st, got){
+  if (facetOff) return;
   const groups = []; for (let i = 0; i < list.length; i += 20) groups.push(list.slice(i, i + 20));
-  let gi = 0, seen = 0;
-  const worker = async () => {
-    while (!job.stop){
-      const g = groups[gi++]; if (!g) return;
-      for (let attempt = 0; attempt < 3; attempt++){
-        try {
-          const r = await fetch(GRAPH + '/$batch', { method: 'POST',
-            headers: { Authorization: 'Bearer ' + await getToken(), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ requests: g.map((t, i) => ({ id: String(i), method: 'GET', url: `${itemPath(t.id)}?$select=id,audio` })) }) });
-          if (r.status === 429 || r.status === 503){ await sleep(2000 * (attempt + 1)); continue; }
-          if (r.ok) (await r.json()).responses.forEach(x => {
-            if (x.status !== 200 || !x.body) return;
-            const ta = audioToTags(x.body.audio);
-            if (ta){ const t = g[+x.id]; t.tags = ta; got.add(t.id); st.od++; }
-          });
-        } catch(e){}
-        break;
-      }
-      seen += g.length; setStatus(`Checking OneDrive’s tag data… ${seen}/${list.length}`);
+  let seen = 0;
+  const runGroup = async g => {
+    for (let attempt = 0; attempt < 3; attempt++){
+      try {
+        const r = await fetch(GRAPH + '/$batch', { method: 'POST',
+          headers: { Authorization: 'Bearer ' + await getToken(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requests: g.map((t, i) => ({ id: String(i), method: 'GET', url: `${itemPath(t.id)}?$select=id,audio` })) }) });
+        if (r.status === 429 || r.status === 503){ await sleep(2000 * (attempt + 1)); continue; }
+        if (r.ok) (await r.json()).responses.forEach(x => {
+          if (x.status !== 200 || !x.body) return;
+          const ta = audioToTags(x.body.audio);
+          if (ta){ const t = g[+x.id]; t.tags = ta; got.add(t.id); st.od++; }
+        });
+      } catch(e){}
+      break;
     }
+    seen += g.length; setStatus(`Checking OneDrive’s tag data… ${seen}/${list.length}`);
   };
+  // probe: if the first 60 files have no OneDrive tag data, don't waste time on the rest
+  await Promise.all(groups.slice(0, 3).map(runGroup));
+  if (!got.size){
+    facetOff = true; store.set('facetOff', true);
+    setStatus('OneDrive has no tag data for these files; reading file headers instead…');
+    return;
+  }
+  let gi = 3;
+  const worker = async () => { while (!job.stop){ const g = groups[gi++]; if (!g) return; await runGroup(g); } };
   await Promise.all(Array.from({ length: 4 }, worker));
 }
 async function readTagsList(list, job){
@@ -915,7 +924,7 @@ async function readTagsList(list, job){
   // Stage 2: only .mp3 files OneDrive had no data for; read just the tag header of each.
   const rest = [];
   list.forEach(t => { if (got.has(t.id)) return; if (/\.mp3$/i.test(t.name)) rest.push(t); else if (!t.tags) t.tags = {}; });
-  let done = 0, lastErr = '';
+  let done = 0, lastErr = '', blocked = '';
   const chunks = []; for (let c = 0; c < rest.length; c += 120) chunks.push(rest.slice(c, c + 120));
   let nextUrls = prefetchUrls(chunks[0] || []);
   for (let c = 0; c < chunks.length && !job.stop; c++){
@@ -927,15 +936,19 @@ async function readTagsList(list, job){
         const t = chunk[k++]; if (!t) return;
         const t0 = performance.now();
         try { await readTags(t); st.file++; st.ms += performance.now() - t0; }
-        catch(e){ lastErr = e.message; noteErr(t, e.message); }
+        catch(e){
+          lastErr = e.message; noteErr(t, e.message);
+          if (!st.file && st.fail >= 6){ blocked = e.message; job.stop = true; }   // nothing is working: stop hammering OneDrive
+        }
         done++;
         if (done % 5 === 0 || done === rest.length) setStatus(`Reading file headers ${done}/${rest.length}…` + (st.fail ? ` (${st.fail} failed)` : ''));
       }
     };
-    await Promise.all(Array.from({ length: 8 }, worker));
+    await Promise.all(Array.from({ length: 6 }, worker));
   }
-  lastTagReport = tagReport(st);
-  return { done, fail: st.fail, lastErr, od: st.od, rest: rest.length };
+  fileReadBlocked = blocked;
+  lastTagReport = tagReport(st) + (blocked ? ` · STOPPED: the first ${st.fail} file reads all failed (${blocked}). Use “Test tag reading” in Settings.` : '');
+  return { done, fail: st.fail, lastErr, od: st.od, rest: rest.length, blocked };
 }
 async function readAllTags(){
   if (tagJob){ tagJob.stop = true; return; }
@@ -944,18 +957,19 @@ async function readAllTags(){
     if (!lib.tracks.size || !confirm('Tags have already been read for every track. Read them all again?')) return;
     list = [...lib.tracks.values()];
   }
+  facetOff = false; store.set('facetOff', false); fileReadBlocked = '';
   const job = tagJob = { stop: false }; refreshTagBtn();
   const r = await readTagsList(list, job);
   tagJob = null; refreshTagBtn();
   lib.at = Date.now(); renderLibrary();
-  if (r.rest && r.fail === r.rest && !r.od){ setStatus('Could not read tags: ' + r.lastErr); return; }
+  if (r.blocked || (r.rest && r.fail === r.rest && !r.od)){ setStatus('Could not read tags: ' + (r.blocked || r.lastErr) + '. Open Settings → Test tag reading.'); return; }
   setStatus(libSummary() + ' · saving index…');
   if (await saveIndexQuiet()) setStatus(libSummary() + ' · index saved. ' + lastTagReport);
 }
 // Read tags for just the tracks of an album/group as it is opened
 let lazyBusy = false, lazyTimer = null;
 async function lazyTags(d, g){
-  if (lazyBusy || tagJob || !tok) return;
+  if (lazyBusy || tagJob || !tok || fileReadBlocked) return;
   const need = g.tracks.filter(t => !t.tags && !t.tagTried);
   if (!need.length || need.length > 150) return;
   lazyBusy = true;
@@ -1028,7 +1042,7 @@ function buildGroups(q){
   return groups;
 }
 function imgTag(item, cls, id){
-  if (!item) return `<div class="${cls}">♪</div>`;
+  if (!item) return `<div class="${cls}" ${id ? `id="${id}"` : ''}>♪</div>`;
   return `<img class="${cls}" alt="" ${id?`id="${id}"`:''} ${item.url ? `src="${esc(item.url)}"` : ''} data-img="${esc(item.id)}">`;
 }
 document.addEventListener('error', async e => {           // refresh expired image links once
@@ -1260,7 +1274,16 @@ const TAG_FIELDS = [['t','Title',1],['a','Artist'],['aa','Album artist'],['al','
 async function openTagEditor(tracks){
   if (!tracks.length) return;
   openDlg('<h2>Edit tags</h2><p class="muted">Reading current tags…</p>');
-  for (const t of tracks){ if (!t.tags){ try { await readTags(t); } catch(e){ flash('Could not read tags: ' + e.message); dlg.close(); return; } } }
+  for (const t of tracks){
+    if (t.tags) continue;
+    try { await readTags(t); }
+    catch(e){
+      openDlg(`<h2>Edit tags</h2><p class="status err">Could not read the tags from “${esc(t.name)}”: ${esc(e.message)}</p>
+        <p class="muted">Editing needs the app to read the file from OneDrive. Run the test to see exactly what is failing.</p>
+        <div class="dbtns"><button class="btn primary" data-d="diag">Test tag reading</button><button class="btn" data-d="close">Close</button></div>`, { diag: () => openDiagnostic() });
+      return;
+    }
+  }
   const multi = tracks.length > 1, init = {}; let inputs = '';
   TAG_FIELDS.forEach(([k, label, single]) => {
     if (multi && single) return;
@@ -1414,7 +1437,7 @@ async function playAt(i, resumeAt){
   if (i < 0 || i >= queue.length) return;
   qi = i; const t = queue[i];
   if (!resumeAt) retried = false;
-  showNow(t); markPlaying();
+  try { showNow(t); markPlaying(); } catch(e){}
   try { if (stale(t)) await refreshUrl(t); }
   catch(e){ flash('Could not get a link for this track: ' + e.message); return; }
   audio.src = t.url;
@@ -1482,6 +1505,60 @@ if ('mediaSession' in navigator){
   navigator.mediaSession.setActionHandler('nexttrack', () => next(false));
 }
 
+/* ---------- Tag reading diagnostic ---------- */
+function openDiagnostic(){
+  openDlg(`<h2>Test tag reading</h2><p class="muted">Tries one MP3 several ways and shows exactly what OneDrive returns. Copy the text below and send it to me if something fails.</p>
+    <pre id="diagLog" class="diag">Starting…</pre>
+    <div class="dbtns"><button class="btn small" data-d="copy">Copy</button><button class="btn small" data-d="back">Back to settings</button><button class="btn small" data-d="close">Close</button></div>`, {
+    copy: () => { const el = $('diagLog'); if (navigator.clipboard) navigator.clipboard.writeText(el.textContent).catch(() => {}); },
+    back: () => openSettings()
+  });
+  diagnoseTags();
+}
+async function diagnoseTags(){
+  const out = [], log = m => { out.push(m); const el = document.getElementById('diagLog'); if (el) el.textContent = out.join('\n'); };
+  const mp3s = [...lib.tracks.values()].filter(x => /\.mp3$/i.test(x.name));
+  if (!mp3s.length){ log('No MP3 files in the library yet.'); return; }
+  const t = mp3s[Math.floor(mp3s.length / 2)];
+  log(`Test file: ${t.path}`);
+  const ms = t0 => Math.round(performance.now() - t0) + ' ms';
+  const readBody = async (res, n) => {
+    const reader = res.body.getReader(), chunks = []; let total = 0;
+    while (total < n){ const r = await reader.read(); if (r.done) break; chunks.push(r.value); total += r.value.length; }
+    reader.cancel().catch(() => {}); return concat(...chunks).subarray(0, n);
+  };
+  const probe = async (label, url, headers) => {
+    const t0 = performance.now();
+    try {
+      const res = await fetch(url, { headers });
+      const b = await readBody(res, 8192);
+      const tag = readID3(b);
+      log(`${label}: HTTP ${res.status} in ${ms(t0)}; got ${b.length} bytes; content-range=${res.headers.get('content-range') || '(none)'}; ${tag ? 'ID3v2.' + tag.ver + ' tag found: ' + JSON.stringify(tagsFromFrames(tag)) : 'no ID3v2 tag at start'}`);
+      return res.status;
+    } catch(e){ log(`${label}: FAILED after ${ms(t0)} — ${e.name}: ${e.message} (usually the browser blocking the request, or a network error)`); return 0; }
+  };
+  try {
+    let t0 = performance.now();
+    const meta = await gfetch(`${itemPath(t.id)}?$select=id,name,size,audio,file`);
+    log(`1. Graph lookup OK in ${ms(t0)}. size=${meta.size} bytes. OneDrive tag data (audio facet): ${meta.audio ? JSON.stringify(meta.audio) : 'NONE'}`);
+    t0 = performance.now(); t.url = ''; await refreshUrl(t);
+    log(`2. Download link ${t.url ? 'obtained' : 'MISSING'} in ${ms(t0)}${t.url ? '; host: ' + new URL(t.url).host : ''}`);
+    if (t.url){
+      await probe('3. First 8 KB via download link', t.url, { Range: 'bytes=0-8191' });
+      await probe('4. Same request again', t.url, { Range: 'bytes=0-8191' });
+    }
+    await probe('5. First 8 KB via Graph /content (signed in)', `${GRAPH}${itemPath(t.id)}/content`, { Range: 'bytes=0-8191', Authorization: 'Bearer ' + await getToken() });
+    const batch = mp3s.slice(0, 6);
+    await prefetchUrls(batch);
+    t0 = performance.now();
+    const codes = await Promise.all(batch.map(x => fetch(x.url, { headers: { Range: 'bytes=0-8191' } }).then(async r => { await readBody(r, 8192); return r.status; }).catch(() => 'blocked')));
+    log(`6. Six files at once: ${codes.join(', ')} in ${ms(t0)} total`);
+    log(`Flags: OneDrive-tag-data skipped=${facetOff}; file reads blocked=${fileReadBlocked || 'no'}`);
+    facetOff = false; store.set('facetOff', false); fileReadBlocked = '';
+    log('Done. (The skip/blocked flags above have now been reset.)');
+  } catch(e){ log('Test stopped: ' + e.message); }
+}
+
 /* ---------- Settings (account, folder, library maintenance, appearance) ---------- */
 function openSettings(){
   const r = store.get('root'), signed = !!tok, dark = document.documentElement.dataset.theme === 'dark';
@@ -1492,7 +1569,7 @@ function openSettings(){
   if (signed){
     h += `<div class="sgroup"><h3>Music folder</h3><p>${r ? esc(r.name) : 'None selected'}</p><div class="dbtns"><button class="btn small" data-d="folder">Change folder</button></div></div>`;
     h += `<div class="sgroup"><h3>Library</h3><p class="muted">${libSummary()}<br>Last updated: ${lib.at ? esc(new Date(lib.at).toLocaleString()) : 'never'}<br>Quick update: ${lib.delta ? 'ready' : 'needs one full rescan first'}</p>
-      <div class="dbtns"><button class="btn small primary" data-d="quick" ${lib.delta ? '' : 'disabled'}>Update changes</button><button class="btn small" data-d="full">Full rescan</button><button class="btn small" data-d="tags">${tagJob ? 'Stop reading tags' : 'Read tags'}</button></div>
+      <div class="dbtns"><button class="btn small primary" data-d="quick" ${lib.delta ? '' : 'disabled'}>Update changes</button><button class="btn small" data-d="full">Full rescan</button><button class="btn small" data-d="tags">${tagJob ? 'Stop reading tags' : 'Read tags'}</button><button class="btn small" data-d="diag">Test tag reading</button></div>
       <label class="opt"><input type="checkbox" id="autoUp" ${store.get('autoUpdate') ? 'checked' : ''}><span>Check for changes when the app opens</span></label>
       <label class="opt"><input type="checkbox" id="lazyUp" ${store.get('lazyTags') !== false ? 'checked' : ''}><span>Read tags for an album when I open it</span></label>
       ${lastTagReport ? `<p class="muted">Last tag run: ${esc(lastTagReport)}</p>` : ''}</div>`;
@@ -1506,6 +1583,7 @@ function openSettings(){
     quick: () => quickUpdate(),
     full: () => { const rt = store.get('root'); if (rt) openLibrary(rt.id, rt.name, true); },
     tags: () => readAllTags(),
+    diag: () => openDiagnostic(),
     light: () => { setTheme('light'); openSettings(); },
     dark: () => { setTheme('dark'); openSettings(); },
     change: e => { if (e.target.id === 'autoUp') store.set('autoUpdate', e.target.checked); if (e.target.id === 'lazyUp') store.set('lazyTags', e.target.checked); }
