@@ -343,14 +343,17 @@ function onSignedIn(){
 
 /* ---------- Graph helpers ---------- */
 const itemPath = id => id === 'root' ? '/me/drive/root' : `/me/drive/items/${encodeURIComponent(id)}`;
+let graphUntil = 0;   // when Graph says "slow down", every caller waits, not just the one that was refused
 async function gfetch(pathOrUrl, tries = 4){
   const url = pathOrUrl.startsWith('http') ? pathOrUrl : GRAPH + pathOrUrl;
   for (let i = 0; i < tries; i++){
+    const gw = Math.min(graphUntil - Date.now(), 15000); if (gw > 0) await sleep(gw);
     let res;
     try { res = await tfetch(url, { headers: { Authorization: 'Bearer ' + await getToken() } }, 30000); }
     catch(e){ if (e.message === 'session expired' || i === tries - 1) throw e; await sleep(600 * 2 ** i); continue; }
     if (res.status === 429 || res.status === 503){
-      diagCount('graph429'); onThrottle(); await sleep((parseInt(res.headers.get('Retry-After')) || 2 ** i) * 1000); continue;
+      diagCount('graph429'); onThrottle();
+      const ra = (parseInt(res.headers.get('Retry-After')) || 2 ** i) * 1000; graphUntil = Math.max(graphUntil, Date.now() + ra); await sleep(ra); continue;
     }
     if (!res.ok) throw new Error(`Graph ${res.status}`);
     return res.json();
@@ -386,15 +389,18 @@ async function prefetchUrls(list){
   for (let i = 0; i < need.length; i += 20) groups.push(need.slice(i, i + 20));
   await Promise.all(groups.map(async g => {
     try {
+      // No $select: some accounts leave the download link out of a $select'ed response, while a plain item request always carries it.
       const r = await tfetch(GRAPH + '/$batch', { method: 'POST',
         headers: { Authorization: 'Bearer ' + await getToken(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requests: g.map((t, i) => ({ id: String(i), method: 'GET', url: `${itemPath(t.id)}?$select=id,@microsoft.graph.downloadUrl` })) }) }, 30000);
-      if (!r.ok) return;
+        body: JSON.stringify({ requests: g.map((t, i) => ({ id: String(i), method: 'GET', url: itemPath(t.id) })) }) }, 30000);
+      if (!r.ok){ diagCount('pfHttp' + r.status); return; }
       (await r.json()).responses.forEach(x => {
         const u = x.status === 200 && x.body && x.body['@microsoft.graph.downloadUrl'];
-        if (u){ const t = g[+x.id]; t.url = u; t.urlAt = Date.now(); }
+        if (u){ const t = g[+x.id]; t.url = u; t.urlAt = Date.now(); diagCount('pfOk'); }
+        else if (x.status === 200){ diagCount('pfNoLink'); if (!dC.pfSample) dC.pfSample = Object.keys(x.body || {}).slice(0, 12).join(','); }
+        else { diagCount('pfSub' + x.status); if (x.status === 429 || x.status === 503) onThrottle(); }
       });
-    } catch(e){}
+    } catch(e){ diagCount('pfErr'); }
   }));
 }
 async function fetchFile(t){
@@ -1148,6 +1154,7 @@ function diagText(){
   const overall = done && elapsed > 0 ? (done / elapsed).toFixed(2) : '–';
   let recent = '–';
   if (dDone.length >= 5){ const span = (last - dDone[0]) / 1000; if (span > 0) recent = ((dDone.length - 1) / span).toFixed(2); }
+  const pfBad = Object.keys(dC).filter(k => /^pf(Http|Sub|Err)/.test(k)).map(k => (k === 'pfErr' ? 'request error' : 'HTTP ' + k.replace(/^pf(Http|Sub)/, '')) + ' ×' + dC[k]).join(', ');
   let hint = '';
   if (done >= 10 && elapsed > 0){
     if ((dC.waitMs || 0) / 1000 / Math.max(1, tagTarget) > elapsed * 0.4) hint = 'Throttling is the main slowdown: workers spend much of their time waiting.';
@@ -1161,6 +1168,7 @@ function diagText(){
     `Workers: ${activeWorkers} active, target ${tagTarget} (lowest ${dC.lowTarget === undefined ? tagTarget : dC.lowTarget}, max ${TAG_MAX})`,
     `Queue: ${n0(tagQueue.length)} waiting` + (tagPaused ? `, PAUSED: ${tagPaused}` : ''),
     `URL prefetch: ${f('prefetch')}; links obtained for ${n0(dC.pfGot || 0)} of ${n0(dC.pfWant || 0)} files`,
+    `Prefetch replies: ${n0(dC.pfOk || 0)} with link, ${n0(dC.pfNoLink || 0)} OK but no link` + (dC.pfSample ? ` (fields returned: ${dC.pfSample})` : '') + (pfBad ? `; failures: ${pfBad}` : ''),
     `Single URL lookups (prefetch missed): ${n0(dC.fallback || 0)}`,
     `First read (32 KB): ${f('first')}`,
     `Second read (up to 256 KB): ${f('second')}`,
