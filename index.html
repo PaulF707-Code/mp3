@@ -39,7 +39,7 @@ main{max-width:1280px;margin:0 auto;padding:18px}
 .list .row{display:flex;width:100%;align-items:center;gap:12px;background:none;border:0;text-align:left;padding:12px 4px}
 .list .row:hover{background:var(--surface)}
 .bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
-#search{flex:1;min-width:0;max-width:560px;background:var(--surface-solid);border:1px solid var(--line);color:var(--text);padding:9px 14px;border-radius:999px;font:inherit}
+#search{flex:1 1 220px;min-width:0;max-width:380px;background:var(--surface-solid);border:1px solid var(--line);color:var(--text);padding:9px 14px;border-radius:999px;font:inherit}
 h3{font-size:1.05rem;margin:26px 0 8px;font-weight:600;color:var(--muted)}
 details.album{border-bottom:1px solid var(--line)}
 details.album summary{display:flex;align-items:center;gap:14px;padding:12px 4px;cursor:pointer;list-style:none}
@@ -119,6 +119,9 @@ header .ico{font-size:1.35rem;width:44px;height:44px}
 .linkbtn{background:none;border:0;padding:0;color:var(--accent);text-decoration:underline;font:inherit;cursor:pointer}
 .erow{padding:6px 8px;border-bottom:1px solid var(--line);font-size:.85rem}
 .erow b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#hstatus{flex:2 1 0;min-width:0;line-height:1.2}
+#hstatus .status{font-size:.72rem;min-height:0;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:899px){ #hstatus{display:none!important} #search{max-width:560px} }
 @media (max-width:819px){
   .panes{display:block}
   .pane{max-height:none;overflow:visible;border:0;padding:0}
@@ -141,6 +144,7 @@ header .ico{font-size:1.35rem;width:44px;height:44px}
 <header>
   <h1>PMMP3</h1>
   <input type="search" id="search" class="hidden" placeholder="Search tracks, artists, albums" aria-label="Search">
+  <div id="hstatus" class="hidden"><div class="status" id="libStatus"></div><div class="status" id="tagStatus"></div></div>
   <button class="ico" id="settingsBtn" title="Settings" aria-label="Settings">⚙</button>
 </header>
 
@@ -164,8 +168,6 @@ header .ico{font-size:1.35rem;width:44px;height:44px}
 
   <!-- Library -->
   <section id="vLibrary" class="hidden">
-    <div class="status" id="libStatus"></div>
-    <div class="status" id="tagStatus"></div>
     <div class="mtabs"><button class="seg on" id="mtabLib" data-m="left">Library</button><button class="seg" id="mtabLists" data-m="right">Lists</button></div>
     <div class="panes" id="panes" data-pane="left">
       <div class="pane" id="leftPane">
@@ -234,7 +236,7 @@ const safe = s => String(s).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/[. ]
 const tg = t => t.tags || {};
 const tTitle = t => tg(t).t || t.title;
 const tArtist = t => tg(t).a || '';
-const setStatus = msg => { const a = document.getElementById('libStatus'), b = document.getElementById('setMsg'); if (a) a.textContent = msg; if (b) b.textContent = msg; };
+const setStatus = msg => { const a = document.getElementById('libStatus'), b = document.getElementById('setMsg'); if (a){ a.textContent = msg; a.title = msg; } if (b) b.textContent = msg; };
 const TAG_KEYS = ['t','a','aa','al','g','y','n','d'];
 const fmt = s => isFinite(s) ? Math.floor(s/60) + ':' + String(Math.floor(s%60)).padStart(2,'0') : '0:00';
 
@@ -405,7 +407,7 @@ async function uploadReplace(item, blob){
 }
 
 /* ---------- Views ---------- */
-function show(id){ ['vSignedOut','vPicker','vLibrary'].forEach(v => $(v).classList.toggle('hidden', v !== id)); $('search').classList.toggle('hidden', id !== 'vLibrary'); }
+function show(id){ ['vSignedOut','vPicker','vLibrary'].forEach(v => $(v).classList.toggle('hidden', v !== id)); $('search').classList.toggle('hidden', id !== 'vLibrary'); $('hstatus').classList.toggle('hidden', id !== 'vLibrary'); }
 
 /* ---------- Folder picker ---------- */
 let pickStack = [{ id:'root', name:'OneDrive' }];
@@ -1045,7 +1047,7 @@ function updateTagStatus(now){
     a.textContent = (c.pending || c.error || tagPaused)
       ? `Tags: ${n0(c.complete + c.empty)} done · ${n0(c.pending)} pending · ${n0(c.error)} errors` + (tagPaused ? ` · paused (${tagPaused}). Open Settings → Retry failed tags.` : '')
       : '';
-    a.classList.toggle('err', !!tagPaused);
+    a.title = a.textContent; a.classList.toggle('err', !!tagPaused);
   }
   if (b) b.textContent = `Tracks: ${n0(lib.tracks.size)}\nTag scan:\n${n0(c.complete)} complete\n${n0(c.empty)} no tags found\n${n0(c.pending)} pending\n${n0(c.error)} errors` +
     (c.top ? `\nMost common error: ${c.top[0]} (×${c.top[1]})` : '') + (tagPaused ? '\nPaused after repeated failures.' : '');
