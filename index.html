@@ -68,6 +68,34 @@ details.album summary::-webkit-details-marker{display:none}
 .ico.main{background:var(--accent);color:var(--accent-ink);width:46px;height:46px}
 .seek{grid-column:1/-1;display:flex;gap:8px;align-items:center;color:var(--muted);font-size:.78rem}
 .seek input{flex:1;accent-color:var(--accent)}
+
+.sel{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:.85rem}
+select,.field{background:var(--surface-solid);color:var(--text);border:1px solid var(--line);padding:7px 12px;font:inherit;border-radius:999px}
+.field{border-radius:10px;width:100%;margin:4px 0 8px}
+.chk{width:20px;height:20px;accent-color:var(--accent);flex:none}
+.list li.prow{display:flex;align-items:center;gap:8px;padding-right:4px}
+.list li.prow .row{flex:1;min-width:0}
+.trk{display:flex;align-items:center}
+.trk .track{flex:1;min-width:0}
+.track span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.track em{color:var(--muted);font-style:normal;margin-left:8px;font-size:.85em}
+.mini{background:none;border:0;border-radius:50%;width:34px;height:34px;color:var(--muted);flex:none}
+.mini:hover{background:var(--surface);color:var(--text)}
+dialog{color:var(--text);background:var(--surface-solid);border:1px solid var(--line);border-radius:14px;width:calc(100% - 28px);max-width:560px;max-height:88vh;overflow:auto;padding:18px}
+dialog::backdrop{background:#000a}
+dialog h2{margin:0 0 6px;font-size:1.25rem}
+.muted{color:var(--muted);font-size:.9rem}
+.dlist{max-height:34vh;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px;margin:8px 0}
+.dlist:empty{display:none}
+.dlist .btn{display:block;width:100%;text-align:left;margin:4px 0;border-radius:8px}
+.drow{display:flex;align-items:center;gap:6px;padding:3px 6px}
+.drow .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.drow em{color:var(--muted);font-style:normal;font-size:.85em;margin-left:6px}
+.dbtns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.flabel{display:block;font-size:.85rem;color:var(--muted);margin-top:6px}
+.opt{display:flex;gap:10px;align-items:flex-start;margin:10px 0;cursor:pointer}
+.opt small{color:var(--muted)}
+.opt input{margin-top:4px;accent-color:var(--accent)}
 @media (max-width:560px){
   #player .inner{grid-template-columns:auto 1fr}
   .ctl{grid-column:1/-1;grid-row:auto;justify-content:center}
@@ -106,15 +134,34 @@ details.album summary::-webkit-details-marker{display:none}
   <!-- Library -->
   <section id="vLibrary" class="hidden">
     <div class="bar">
-      <input type="search" id="search" placeholder="Search tracks and folders" aria-label="Search">
+      <input type="search" id="search" placeholder="Search tracks, artists, albums" aria-label="Search">
       <button class="btn small" id="shuffleAll">Shuffle all</button>
-      <button class="btn small" id="changeFolder">Change folder</button>
+    </div>
+    <div class="bar">
+      <label class="sel">View
+        <select id="viewSel">
+          <option value="folders">Folders</option><option value="artist">Artist</option><option value="album">Album</option>
+          <option value="genre">Genre</option><option value="year">Year</option><option value="all">All tracks</option>
+        </select></label>
+      <label class="sel">Sort
+        <select id="sortSel">
+          <option value="default">Default</option><option value="title">Title</option><option value="artist">Artist</option>
+          <option value="album">Album</option><option value="year">Year</option><option value="genre">Genre</option>
+        </select></label>
+    </div>
+    <div class="bar">
+      <button class="btn small" id="readTags">Read tags</button>
+      <button class="btn small" id="newPl">New playlist</button>
+      <button class="btn small primary hidden" id="dlBtn">Download (0)</button>
       <button class="btn small" id="rescan">Rescan</button>
+      <button class="btn small" id="changeFolder">Change folder</button>
     </div>
     <div class="status" id="libStatus"></div>
     <div id="libraryBody"></div>
   </section>
 </main>
+
+<dialog id="dlg"></dialog>
 
 <div id="player" class="hidden">
   <div class="inner">
@@ -141,14 +188,6 @@ const CONFIG = Object.assign({
   scopes: ['Files.ReadWrite', 'User.Read']
 }, window.APP_CONFIG || {});
 
-/* ---------- Colour themes ---------- */
-const THEMES = ['light', 'dark'];
-function setTheme(t){
-  if (!THEMES.includes(t)) t = 'light';
-  document.documentElement.dataset.theme = t; store.set('theme', t);
-  const b = document.getElementById('themeBtn'); if (b) b.textContent = t === 'dark' ? 'Light mode' : 'Dark mode';
-}
-
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 const AUDIO_RE = /\.(mp3|m4a|aac|ogg|wav|flac)$/i;
 const LIST_RE  = /\.(m3u8?|pls)$/i;
@@ -160,6 +199,20 @@ const store = {
   get(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } },
   set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 };
+const cmpS = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+const safe = s => String(s).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/[. ]+$/, '').trim().slice(0, 120) || '_';
+const tg = t => t.tags || {};
+const tTitle = t => tg(t).t || t.title;
+const tArtist = t => tg(t).a || '';
+const fmt = s => isFinite(s) ? Math.floor(s/60) + ':' + String(Math.floor(s%60)).padStart(2,'0') : '0:00';
+
+/* ---------- Colour themes ---------- */
+const THEMES = ['light', 'dark'];
+function setTheme(t){
+  if (!THEMES.includes(t)) t = 'light';
+  document.documentElement.dataset.theme = t; store.set('theme', t);
+  const b = $('themeBtn'); if (b) b.textContent = t === 'dark' ? 'Light mode' : 'Dark mode';
+}
 
 /* ---------- Auth (OAuth 2.0 authorization code + PKCE, no library needed) ---------- */
 const REDIRECT = location.origin + location.pathname;
@@ -245,6 +298,14 @@ async function gfetch(pathOrUrl, tries = 4){
   }
   throw new Error('Graph is busy, try again shortly');
 }
+// Write calls. If contentType is given, body is sent raw; otherwise it is JSON.
+async function gsend(path, method, body, contentType){
+  const headers = { Authorization: 'Bearer ' + await getToken() };
+  if (body !== undefined) headers['Content-Type'] = contentType || 'application/json';
+  const res = await fetch(GRAPH + path, { method, headers, body: body === undefined ? undefined : (contentType ? body : JSON.stringify(body)) });
+  if (!res.ok) throw new Error(res.status === 401 || res.status === 403 ? 'no write permission (sign out and sign in again)' : 'OneDrive ' + res.status);
+  return res.status === 204 ? null : res.json().catch(() => null);
+}
 async function listChildren(id, cb){
   let url = `${itemPath(id)}/children?$top=200`;
   while (url){
@@ -259,6 +320,36 @@ async function refreshUrl(item){
   return item.url;
 }
 const stale = item => !item.url || Date.now() - (item.urlAt || 0) > 25 * 60 * 1000;
+async function freshUrl(item){ if (stale(item)) await refreshUrl(item); return item.url; }
+async function fetchFile(t){
+  let res;
+  try { res = await fetch(await freshUrl(t)); }
+  catch(e){ throw new Error('the browser could not read the file contents'); }
+  if (!res.ok) throw new Error('download failed (' + res.status + ')');
+  return res;
+}
+async function fetchText(item){
+  try { return await (await fetchFile(item)).text(); }
+  catch(_){
+    const r = await fetch(`${GRAPH}${itemPath(item.id)}/content`, { headers: { Authorization: 'Bearer ' + await getToken() } });
+    if (!r.ok) throw new Error('could not read ' + item.name);
+    return r.text();
+  }
+}
+// Replace the content of an existing OneDrive file (upload session, works for any size)
+async function uploadReplace(item, blob){
+  const sess = await gsend(`${itemPath(item.id)}/createUploadSession`, 'POST', { item: { '@microsoft.graph.conflictBehavior': 'replace' } });
+  if (!sess || !sess.uploadUrl) throw new Error('could not start upload');
+  const size = blob.size, CH = 327680 * 10; let pos = 0;
+  while (pos < size){
+    const end = Math.min(pos + CH, size);
+    let res;
+    try { res = await fetch(sess.uploadUrl, { method: 'PUT', headers: { 'Content-Range': `bytes ${pos}-${end - 1}/${size}` }, body: blob.slice(pos, end) }); }
+    catch(e){ throw new Error('upload blocked by the browser'); }
+    if (![200, 201, 202].includes(res.status)) throw new Error('upload failed (' + res.status + ')');
+    pos = end;
+  }
+}
 
 /* ---------- Views ---------- */
 function show(id){ ['vSignedOut','vPicker','vLibrary'].forEach(v => $(v).classList.toggle('hidden', v !== id)); }
@@ -273,7 +364,7 @@ async function loadPicker(){
   const folders = [];
   try { await listChildren(cur.id, it => { if (it.folder) folders.push(it); }); }
   catch(e){ $('pickStatus').textContent = 'Could not load folders: ' + e.message; return; }
-  folders.sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric:true}));
+  folders.sort((a,b) => cmpS(a.name, b.name));
   $('pickStatus').textContent = folders.length ? '' : 'No subfolders here.';
   $('folderList').innerHTML = folders.map(f =>
     `<li><button class="row" data-id="${esc(f.id)}" data-name="${esc(f.name)}"><span class="cover" style="width:36px;height:36px;font-size:1rem">▸</span><span class="meta"><b>${esc(f.name)}</b><span>${f.folder.childCount} items</span></span></button></li>`).join('');
@@ -291,11 +382,40 @@ $('useFolder').addEventListener('click', () => {
   store.set('root', cur); openLibrary(cur.id, cur.name, false);
 });
 
+/* ---------- Dialog helper ---------- */
+const dlg = $('dlg'); let dlgH = {};
+function openDlg(html, handlers){
+  dlgH = handlers || {}; dlg.innerHTML = html;
+  if (!dlg.open) dlg.showModal();
+}
+dlg.addEventListener('click', e => {
+  const el = e.target.closest('[data-d]'); if (!el) return;
+  const a = el.dataset.d;
+  if (a === 'close'){ dlg.close(); return; }
+  if (dlgH[a]) dlgH[a](el, e);
+});
+dlg.addEventListener('input', e => { if (dlgH.input) dlgH.input(e); });
+dlg.addEventListener('close', () => { if (dlgH.onclose) dlgH.onclose(); });
+const flash = (msg) => { $('libStatus').textContent = msg; };
+
+/* ---------- Library state ---------- */
+let lib = { folders: new Map(), playlists: [], tracks: new Map(), at: 0 };
+const sel = new Map();   // selected groups / playlists for download
+let curGroups = [];
+
+function indexLib(){
+  lib.byPath = new Map(); lib.byName = new Map();
+  lib.tracks.forEach(t => {
+    lib.byPath.set(t.path.toLowerCase(), t);
+    const k = t.name.toLowerCase(); (lib.byName.get(k) || lib.byName.set(k, []).get(k)).push(t);
+  });
+}
+
 /* ---------- Library scan ---------- */
-let lib = { folders: new Map(), playlists: [], tracks: new Map() };
 async function scan(rootId, rootName){
   show('vLibrary'); $('libraryBody').innerHTML = '';
-  lib = { folders: new Map(), playlists: [], tracks: new Map() };
+  const oldTags = new Map(); lib.tracks.forEach(t => { if (t.tags) oldTags.set(t.id, t.tags); });
+  lib = { folders: new Map(), playlists: [], tracks: new Map(), at: 0 };
   const queue = [{ id: rootId, path: '' }]; let rootFailed = false;
   let active = 0, foldersDone = 0;
   const setMsg = () => { $('libStatus').textContent = `Scanning ${rootName}… ${foldersDone} folders, ${lib.tracks.size} tracks`; };
@@ -313,7 +433,7 @@ async function scan(rootId, rootName){
           if (!it.file) return;
           const base = { id: it.id, name: it.name, folder: f.path, path: f.path ? f.path + '/' + it.name : it.name, url: it['@microsoft.graph.downloadUrl'], urlAt: Date.now() };
           if (AUDIO_RE.test(it.name)){
-            const t = { ...base, title: it.name.replace(/\.[^.]+$/, '').replace(/_/g, ' ') };
+            const t = { ...base, title: it.name.replace(/\.[^.]+$/, '').replace(/_/g, ' '), tags: oldTags.get(it.id) };
             rec.tracks.push(t); lib.tracks.set(t.id, t);
           } else if (LIST_RE.test(it.name)){
             lib.playlists.push({ ...base, title: it.name.replace(/\.[^.]+$/, '') });
@@ -327,10 +447,9 @@ async function scan(rootId, rootName){
   };
   await Promise.all([worker(), worker(), worker(), worker()]);
   if (rootFailed && !lib.tracks.size && !lib.playlists.length){ openPicker(); return; }
-  const nat = (a,b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
-  lib.folders.forEach(f => { f.tracks.sort(nat); f.images.sort(nat); });
-  lib.playlists.sort(nat);
-  lib.at = Date.now();
+  lib.folders.forEach(f => { f.tracks.sort((a,b) => cmpS(a.name, b.name)); f.images.sort((a,b) => cmpS(a.name, b.name)); });
+  lib.playlists.sort((a,b) => cmpS(a.name, b.name));
+  indexLib(); lib.at = Date.now(); sel.clear(); updateDlBtn();
   $('libStatus').textContent = libSummary() + ' · saving index…';
   renderLibrary();
   try { await saveIndex(rootId); $('libStatus').textContent = libSummary() + ' · index saved to OneDrive'; }
@@ -339,8 +458,10 @@ async function scan(rootId, rootName){
 
 /* ---------- Saved library index (stored in the chosen OneDrive folder) ---------- */
 const INDEX_NAME = 'mp3player-library.json';
-const libSummary = () => `${lib.tracks.size} tracks · ${lib.playlists.length} playlists · ${[...lib.folders.values()].filter(f=>f.tracks.length).length} folders`;
-
+const libSummary = () => {
+  let tagged = 0; lib.tracks.forEach(t => { if (t.tags) tagged++; });
+  return `${lib.tracks.size} tracks · ${lib.playlists.length} playlists · ${tagged} with tags read`;
+};
 async function openLibrary(id, name, force){
   show('vLibrary'); $('libraryBody').innerHTML = '';
   if (!force){
@@ -348,7 +469,7 @@ async function openLibrary(id, name, force){
     const data = await loadIndex(id);
     if (data){
       hydrate(data, name); renderLibrary();
-      $('libStatus').textContent = libSummary() + ' · saved ' + new Date(data.at).toLocaleString() + ' (use Rescan after adding music)';
+      $('libStatus').textContent = libSummary() + ' · saved ' + new Date(data.at).toLocaleString();
       return;
     }
   }
@@ -361,38 +482,274 @@ async function loadIndex(rootId){
     try { res = await fetch(meta['@microsoft.graph.downloadUrl']); if (!res.ok) throw 0; }
     catch(_){ res = await fetch(`${GRAPH}${itemPath(rootId)}:/${INDEX_NAME}:/content`, { headers: { Authorization: 'Bearer ' + await getToken() } }); }
     const d = await res.json();
-    return (d && d.v === 1 && d.rootId === rootId) ? d : null;
+    return (d && (d.v === 1 || d.v === 2) && d.rootId === rootId) ? d : null;
   } catch(e){ return null; }
 }
 function hydrate(d, rootName){
   lib = { folders: new Map(), playlists: [], tracks: new Map(), at: d.at };
-  const mk = (path, [id, name]) => ({ id, name, folder: path, path: path ? path + '/' + name : name, url: '', urlAt: 0 });
+  const mk = (path, id, name) => ({ id, name, folder: path, path: path ? path + '/' + name : name, url: '', urlAt: 0 });
+  const KEYS = ['t','a','aa','al','g','y','n','d'];
   d.f.forEach(([path, tracks, images]) => {
     lib.folders.set(path, {
       path, name: path ? path.split('/').pop() : rootName,
-      tracks: tracks.map(t => { const x = { ...mk(path, t), title: t[1].replace(/\.[^.]+$/, '').replace(/_/g, ' ') }; lib.tracks.set(x.id, x); return x; }),
-      images: images.map(i => mk(path, i))
+      tracks: tracks.map(r => {
+        const x = { ...mk(path, r[0], r[1]), title: r[1].replace(/\.[^.]+$/, '').replace(/_/g, ' ') };
+        if (Array.isArray(r[2])){ x.tags = {}; KEYS.forEach((k, i) => { const v = r[2][i]; if (v) x.tags[k] = v; }); }
+        lib.tracks.set(x.id, x); return x;
+      }),
+      images: images.map(i => mk(path, i[0], i[1]))
     });
   });
-  lib.playlists = d.p.map(p => ({ ...mk(p[2], [p[0], p[1]]), title: p[1].replace(/\.[^.]+$/, '') }));
+  lib.playlists = d.p.map(p => ({ ...mk(p[2], p[0], p[1]), title: p[1].replace(/\.[^.]+$/, '') }));
+  indexLib();
 }
 async function saveIndex(rootId){
+  const row = t => { const g = t.tags; return [t.id, t.name, g ? [g.t||'', g.a||'', g.aa||'', g.al||'', g.g||'', g.y||'', g.n||0, g.d||0] : 0]; };
   const payload = {
-    v: 1, rootId, at: lib.at,
-    f: [...lib.folders.values()].map(f => [f.path, f.tracks.map(t => [t.id, t.name]), f.images.map(i => [i.id, i.name])]),
+    v: 2, rootId, at: lib.at || Date.now(),
+    f: [...lib.folders.values()].map(f => [f.path, f.tracks.map(row), f.images.map(i => [i.id, i.name])]),
     p: lib.playlists.map(p => [p.id, p.name, p.folder])
   };
   const body = JSON.stringify(payload);
   if (body.length > 3.5e6) throw new Error('library too large to save');
-  const res = await fetch(`${GRAPH}${itemPath(rootId)}:/${INDEX_NAME}:/content`, {
-    method: 'PUT', headers: { Authorization: 'Bearer ' + await getToken(), 'Content-Type': 'application/json' }, body
-  });
-  if (!res.ok) throw new Error(res.status === 403 || res.status === 401 ? 'no write permission: sign out and sign in again' : 'OneDrive ' + res.status);
+  await gsend(`${itemPath(rootId)}:/${INDEX_NAME}:/content`, 'PUT', body, 'application/json');
+}
+const saveIndexQuiet = async () => { const r = store.get('root'); if (!r) return; try { await saveIndex(r.id); } catch(e){ flash('Could not save index: ' + e.message); } };
+
+/* =================================================================
+   ID3 TAGS (read + write). Self-contained, no libraries.
+   ================================================================= */
+/* ===ID3 START */
+const GENRES = 'Blues,Classic Rock,Country,Dance,Disco,Funk,Grunge,Hip-Hop,Jazz,Metal,New Age,Oldies,Other,Pop,R&B,Rap,Reggae,Rock,Techno,Industrial,Alternative,Ska,Death Metal,Pranks,Soundtrack,Euro-Techno,Ambient,Trip-Hop,Vocal,Jazz+Funk,Fusion,Trance,Classical,Instrumental,Acid,House,Game,Sound Clip,Gospel,Noise,Alt. Rock,Bass,Soul,Punk,Space,Meditative,Instrumental Pop,Instrumental Rock,Ethnic,Gothic,Darkwave,Techno-Industrial,Electronic,Pop-Folk,Eurodance,Dream,Southern Rock,Comedy,Cult,Gangsta,Top 40,Christian Rap,Pop/Funk,Jungle,Native American,Cabaret,New Wave,Psychedelic,Rave,Showtunes,Trailer,Lo-Fi,Tribal,Acid Punk,Acid Jazz,Polka,Retro,Musical,Rock & Roll,Hard Rock'.split(',');
+const WANT = new Set(['TIT2','TPE1','TPE2','TALB','TCON','TDRC','TYER','TRCK','TPOS','TT2','TP1','TP2','TAL','TCO','TYE','TRK','TPA']);
+const TAGMAP = { TIT2:'t', TT2:'t', TPE1:'a', TP1:'a', TPE2:'aa', TP2:'aa', TALB:'al', TAL:'al', TCON:'g', TCO:'g', TDRC:'y', TYER:'y', TYE:'y', TRCK:'n', TRK:'n', TPOS:'d', TPA:'d' };
+const sync7 = (b, o) => ((b[o]&127)<<21) | ((b[o+1]&127)<<14) | ((b[o+2]&127)<<7) | (b[o+3]&127);
+const be32 = (b, o) => (((b[o]<<24) | (b[o+1]<<16) | (b[o+2]<<8) | b[o+3]) >>> 0);
+function concat(...arrs){
+  let n = 0; arrs.forEach(a => n += a.length);
+  const out = new Uint8Array(n); let o = 0;
+  arrs.forEach(a => { out.set(a, o); o += a.length; });
+  return out;
+}
+function deunsync(b){
+  const out = new Uint8Array(b.length); let j = 0;
+  for (let i = 0; i < b.length; i++){ out[j++] = b[i]; if (b[i] === 0xFF && b[i+1] === 0x00) i++; }
+  return out.subarray(0, j);
+}
+function decodeText(enc, b){
+  let s;
+  if (enc === 1){
+    if (b[0] === 0xFF && b[1] === 0xFE) s = new TextDecoder('utf-16le').decode(b.subarray(2));
+    else if (b[0] === 0xFE && b[1] === 0xFF) s = new TextDecoder('utf-16be').decode(b.subarray(2));
+    else s = new TextDecoder('utf-16le').decode(b);
+  } else if (enc === 2) s = new TextDecoder('utf-16be').decode(b);
+  else if (enc === 3) s = new TextDecoder('utf-8').decode(b);
+  else s = new TextDecoder('iso-8859-1').decode(b);
+  return s.split('\0').filter(Boolean).join(' / ');
+}
+function readID3(b){
+  if (b.length < 10 || b[0] !== 0x49 || b[1] !== 0x44 || b[2] !== 0x33) return null;
+  const ver = b[3], flags = b[5], size = sync7(b, 6);
+  if (ver < 2 || ver > 4) return null;
+  const total = 10 + size + ((ver === 4 && (flags & 0x10)) ? 10 : 0);
+  let data = b.subarray(10, Math.min(10 + size, b.length));
+  if (flags & 0x80) data = deunsync(data);
+  let pos = 0;
+  if ((flags & 0x40) && ver >= 3) pos = ver === 4 ? sync7(data, 0) : 4 + be32(data, 0);
+  const frames = []; let need = 0; const hl = ver === 2 ? 6 : 10;
+  while (pos + hl <= data.length){
+    if (data[pos] === 0) break;
+    const id = String.fromCharCode(data[pos], data[pos+1], data[pos+2], ver === 2 ? 0 : data[pos+3]).replace(/\0/g, '');
+    let sz, fl = 0;
+    if (ver === 2) sz = (data[pos+3] << 16) | (data[pos+4] << 8) | data[pos+5];
+    else { sz = ver === 4 ? sync7(data, pos + 4) : be32(data, pos + 4); fl = (data[pos+8] << 8) | data[pos+9]; }
+    const s = pos + hl, e = s + sz;
+    if (e > data.length){ if (WANT.has(id)) need = 10 + e; break; }
+    frames.push({ id, fl, data: data.subarray(s, e) });
+    pos = e;
+  }
+  return { ver, flags, size, total, frames, need };
+}
+function genreName(v){
+  let m = v.match(/^\((\d+)\)\s*(.*)$/);
+  if (m) return m[2] || GENRES[+m[1]] || v;
+  if (/^\d+$/.test(v)) return GENRES[+v] || v;
+  return v;
+}
+function frameText(f, ver){
+  let d = f.data;
+  if (ver === 3 && (f.fl & 0xC0)) return null;
+  if (ver === 4 && (f.fl & 0x0C)) return null;
+  if (ver === 4){ if (f.fl & 0x02) d = deunsync(d); if (f.fl & 0x01) d = d.subarray(4); }
+  if (!d.length) return '';
+  return decodeText(d[0], d.subarray(1));
+}
+function tagsFromFrames(tag){
+  const o = {};
+  for (const f of tag.frames){
+    const k = TAGMAP[f.id]; if (!k || o[k] !== undefined) continue;
+    let v = frameText(f, tag.ver); if (v == null) continue;
+    v = v.trim(); if (!v) continue;
+    if (k === 'g') v = genreName(v);
+    else if (k === 'y'){ const m = v.match(/\d{4}/); if (!m) continue; v = m[0]; }
+    else if (k === 'n' || k === 'd'){ const n = parseInt(v, 10); if (!n) continue; v = n; }
+    o[k] = v;
+  }
+  return o;
+}
+function textPayload(text, ver){
+  const enc8 = new TextEncoder();
+  if (ver === 4) return concat(Uint8Array.of(3), enc8.encode(text));
+  if (/^[\x00-\xFF]*$/.test(text)){
+    const b = new Uint8Array(text.length + 1);
+    for (let i = 0; i < text.length; i++) b[i+1] = text.charCodeAt(i);
+    return b;
+  }
+  const b = new Uint8Array(3 + text.length * 2); b[0] = 1; b[1] = 0xFF; b[2] = 0xFE;
+  for (let i = 0; i < text.length; i++){ const c = text.charCodeAt(i); b[3 + i*2] = c & 255; b[4 + i*2] = c >> 8; }
+  return b;
+}
+function frameBytes(id, fl, data, ver){
+  const h = new Uint8Array(10); for (let i = 0; i < 4; i++) h[i] = id.charCodeAt(i);
+  const n = data.length;
+  if (ver === 4){ h[4] = (n >> 21) & 127; h[5] = (n >> 14) & 127; h[6] = (n >> 7) & 127; h[7] = n & 127; }
+  else { h[4] = (n >>> 24) & 255; h[5] = (n >> 16) & 255; h[6] = (n >> 8) & 255; h[7] = n & 255; }
+  h[8] = fl >> 8; h[9] = fl & 255;
+  return concat(h, data);
+}
+// Returns [newTagBytes, audioBytes]. `ch` maps tag keys to new text values ('' removes the frame).
+function rewriteID3(bytes, ch){
+  let ver = 3, frames = [], start = 0;
+  const tag = readID3(bytes);
+  if (tag){ start = tag.total; if (tag.ver >= 3){ ver = tag.ver; frames = tag.frames; } }
+  const DROP = { t:['TIT2'], a:['TPE1'], aa:['TPE2'], al:['TALB'], g:['TCON'], y:['TYER','TDRC','TDAT','TIME'], n:['TRCK'], d:['TPOS'] };
+  const drop = new Set(); Object.keys(ch).forEach(k => DROP[k].forEach(i => drop.add(i)));
+  const keep = frames.filter(f => !drop.has(f.id));
+  const IDS = { t:'TIT2', a:'TPE1', aa:'TPE2', al:'TALB', g:'TCON', n:'TRCK', d:'TPOS', y: ver === 4 ? 'TDRC' : 'TYER' };
+  const add = [];
+  for (const k of Object.keys(ch)){ const v = String(ch[k]).trim(); if (v) add.push({ id: IDS[k], fl: 0, data: textPayload(v, ver) }); }
+  const body = concat(...keep.concat(add).map(f => frameBytes(f.id, f.fl, f.data, ver)));
+  const pad = 256, size = body.length + pad;
+  const h = new Uint8Array(10); h.set([0x49, 0x44, 0x33, ver, 0, 0]);
+  h[6] = (size >> 21) & 127; h[7] = (size >> 14) & 127; h[8] = (size >> 7) & 127; h[9] = size & 127;
+  return [concat(h, body, new Uint8Array(pad)), bytes.subarray(start)];
+}
+/* ===ID3 END */
+
+async function readRange(t, start, end){
+  const url = await freshUrl(t);
+  let res;
+  try { res = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } }); }
+  catch(e){ throw new Error('the browser could not read the file contents'); }
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const reader = res.body.getReader(), chunks = []; let total = 0;
+  while (total <= end - start){ const r = await reader.read(); if (r.done) break; chunks.push(r.value); total += r.value.length; }
+  reader.cancel().catch(() => {});
+  return concat(...chunks).subarray(0, end - start + 1);
+}
+async function readTags(t){
+  let buf = await readRange(t, 0, 32767);
+  let tag = readID3(buf);
+  if (tag && tag.need > buf.length){ buf = await readRange(t, 0, Math.min(tag.need, 1 << 20) - 1); tag = readID3(buf); }
+  t.tags = tag ? tagsFromFrames(tag) : {};
+}
+async function writeTags(t, ch){
+  const bytes = new Uint8Array(await (await fetchFile(t)).arrayBuffer());
+  await uploadReplace(t, new Blob(rewriteID3(bytes, ch)));
+  const nt = { ...tg(t) };
+  for (const k of Object.keys(ch)){
+    const v = String(ch[k]).trim();
+    if (k === 'n' || k === 'd'){ const n = parseInt(v, 10); if (n) nt[k] = n; else delete nt[k]; }
+    else if (k === 'y'){ const m = v.match(/\d{4}/); if (m) nt[k] = m[0]; else delete nt[k]; }
+    else if (v) nt[k] = v; else delete nt[k];
+  }
+  t.tags = nt; t.url = ''; t.urlAt = 0;
 }
 
+let tagJob = null;
+async function readAllTags(){
+  if (tagJob){ tagJob.stop = true; return; }
+  let list = [...lib.tracks.values()].filter(t => !t.tags);
+  if (!list.length){
+    if (!lib.tracks.size || !confirm('Tags have already been read for every track. Read them all again?')) return;
+    list = [...lib.tracks.values()];
+  }
+  const job = tagJob = { stop: false }; $('readTags').textContent = 'Stop';
+  let done = 0, fail = 0, i = 0, lastErr = '';
+  const worker = async () => {
+    while (!job.stop){
+      const t = list[i++]; if (!t) return;
+      try { await readTags(t); } catch(e){ fail++; lastErr = e.message; }
+      done++;
+      if (done % 5 === 0 || done === list.length) $('libStatus').textContent = `Reading tags ${done}/${list.length}…` + (fail ? ` (${fail} failed)` : '');
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+  tagJob = null; $('readTags').textContent = 'Read tags';
+  lib.at = Date.now(); renderLibrary();
+  if (fail && fail === done) { flash('Could not read tags: ' + lastErr); return; }
+  flash(libSummary() + (fail ? ` · ${fail} files failed (${lastErr})` : '') + ' · saving index…');
+  await saveIndexQuiet();
+  if (!/Could not/.test($('libStatus').textContent)) flash(libSummary() + ' · index saved');
+}
+
+/* ---------- Grouping / sorting / rendering ---------- */
+const VIEW_TITLES = { folders: 'Folders', artist: 'Artists', album: 'Albums', genre: 'Genres', year: 'Years', all: 'All tracks' };
+function trackCmp(sortBy, view){
+  const alb = (x, y) => { const a = tg(x), b = tg(y); return cmpS(a.al || '~', b.al || '~') || ((a.d||0) - (b.d||0)) || ((a.n||0) - (b.n||0)) || cmpS(tTitle(x), tTitle(y)); };
+  return (x, y) => {
+    const a = tg(x), b = tg(y);
+    switch (sortBy){
+      case 'title':  return cmpS(tTitle(x), tTitle(y));
+      case 'artist': return cmpS(a.a || '~', b.a || '~') || alb(x, y);
+      case 'album':  return alb(x, y);
+      case 'year':   return cmpS(a.y || '~', b.y || '~') || alb(x, y);
+      case 'genre':  return cmpS(a.g || '~', b.g || '~') || alb(x, y);
+      default:       return view === 'folders' ? cmpS(x.name, y.name) : alb(x, y);
+    }
+  };
+}
 function coverOf(folder){
   const imgs = folder.images;
   return imgs.find(i => /^(cover|folder|front|album)/i.test(i.name)) || imgs[0] || null;
+}
+function buildGroups(q){
+  const view = $('viewSel').value, sortBy = $('sortSel').value;
+  let groups = [];
+  if (view === 'folders'){
+    groups = [...lib.folders.values()].filter(f => f.tracks.length).map(f => ({
+      key: f.path, name: f.name, sub: f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '', tracks: f.tracks.slice(), cover: coverOf(f) }));
+    groups.sort((a, b) => cmpS(a.key, b.key));
+  } else if (view === 'all'){
+    groups = [{ key: 'all', name: 'All tracks', sub: '', tracks: [...lib.tracks.values()], cover: null }];
+  } else {
+    const m = new Map();
+    lib.tracks.forEach(t => {
+      const g = tg(t);
+      const key = view === 'artist' ? (g.aa || g.a || 'Unknown artist')
+                : view === 'album'  ? (g.al || 'Unknown album')
+                : view === 'genre'  ? (g.g || 'Unknown genre')
+                : (g.y || 'Unknown year');
+      if (!m.has(key)) m.set(key, { key, name: key, sub: '', tracks: [], cover: null });
+      m.get(key).tracks.push(t);
+    });
+    groups = [...m.values()];
+    groups.forEach(g => {
+      for (const t of g.tracks.slice(0, 12)){ const f = lib.folders.get(t.folder); const c = f && coverOf(f); if (c){ g.cover = c; break; } }
+      if (view === 'album'){ const a = tg(g.tracks[0]); g.sub = a.aa || a.a || ''; }
+    });
+    groups.sort((a, b) => /^Unknown/.test(a.name) - /^Unknown/.test(b.name) || cmpS(a.name, b.name));
+  }
+  const cmp = trackCmp(sortBy, view);
+  groups.forEach(g => g.tracks.sort(cmp));
+  if (q){
+    groups = groups.map(g => {
+      const gm = g.name.toLowerCase().includes(q) || g.sub.toLowerCase().includes(q);
+      const tr = gm ? g.tracks : g.tracks.filter(t => { const a = tg(t); return [tTitle(t), a.a, a.aa, a.al, a.g, a.y, t.name].some(x => x && String(x).toLowerCase().includes(q)); });
+      return { ...g, tracks: tr };
+    }).filter(g => g.tracks.length);
+  }
+  return groups;
 }
 function imgTag(item, cls, id){
   if (!item) return `<div class="${cls}">♪</div>`;
@@ -414,76 +771,366 @@ function observeLazy(){ document.querySelectorAll('img[data-img]:not([src])').fo
 function findImage(id){ for (const f of lib.folders.values()){ const i = f.images.find(x => x.id === id); if (i) return i; } return null; }
 
 function renderLibrary(){
-  const q = $('search').value.trim().toLowerCase();
+  const q = $('search').value.trim().toLowerCase(), view = $('viewSel').value;
+  curGroups = buildGroups(q);
   let html = '';
   if (lib.playlists.length && !q){
     html += '<h3>Playlists</h3><ul class="list">' + lib.playlists.map(p =>
-      `<li><button class="row" data-act="playlist" data-id="${esc(p.id)}"><span class="cover" style="width:36px;height:36px;font-size:1rem">≡</span><span class="meta"><b>${esc(p.title)}</b><span>${esc(p.folder || 'Top folder')}</span></span></button></li>`).join('') + '</ul>';
+      `<li class="prow"><input type="checkbox" class="chk" data-act="selP" data-id="${esc(p.id)}" aria-label="Select ${esc(p.title)}" ${sel.has('p:' + p.id) ? 'checked' : ''}>
+        <button class="row" data-act="playlist" data-id="${esc(p.id)}"><span class="cover" style="width:36px;height:36px;font-size:1rem">≡</span><span class="meta"><b>${esc(p.title)}</b><span>${p.tracks ? p.tracks.length + ' tracks' : esc(p.folder || 'Top folder')}</span></span></button>
+        <button class="btn small" data-act="editPlaylist" data-id="${esc(p.id)}">Edit</button></li>`).join('') + '</ul>';
   }
-  html += '<h3>Folders</h3>';
-  [...lib.folders.values()].filter(f => f.tracks.length).sort((a,b)=>a.path.localeCompare(b.path,undefined,{numeric:true})).forEach(f => {
-    const tracks = q ? f.tracks.filter(t => t.title.toLowerCase().includes(q) || f.path.toLowerCase().includes(q)) : f.tracks;
-    if (!tracks.length) return;
-    html += `<details class="album" ${q ? 'open' : ''}><summary>${imgTag(coverOf(f),'cover')}<span class="meta"><b>${esc(f.name)}</b><span>${esc(f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) + ' · ' : '')}${tracks.length} tracks</span></span>
-      <button class="btn small" data-act="playFolder" data-f="${esc(f.path)}">Play</button></summary>
-      <div class="tracks">${tracks.map((t,i) => `<button class="track" data-act="playTrack" data-f="${esc(f.path)}" data-id="${esc(t.id)}"><small>${i+1}</small><span>${esc(t.title)}</span></button>`).join('')}</div></details>`;
+  html += `<h3>${VIEW_TITLES[view]}</h3>`;
+  if (view !== 'folders'){
+    let untagged = 0; lib.tracks.forEach(t => { if (!t.tags) untagged++; });
+    if (untagged) html += `<p class="status">Tags have not been read for ${untagged} tracks yet. Press “Read tags” to organise by tag.</p>`;
+  }
+  curGroups.forEach((g, gi) => {
+    const checked = sel.has(`g:${view}:${g.key}`) ? 'checked' : '';
+    html += `<details class="album" data-gi="${gi}" ${q ? 'open' : ''}><summary>
+      <input type="checkbox" class="chk" data-act="sel" data-gi="${gi}" aria-label="Select ${esc(g.name)}" ${checked}>
+      ${imgTag(g.cover, 'cover')}
+      <span class="meta"><b>${esc(g.name)}</b><span>${g.sub ? esc(g.sub) + ' · ' : ''}${g.tracks.length} tracks</span></span>
+      <button class="mini" data-act="editGroup" data-gi="${gi}" title="Edit tags for these tracks" aria-label="Edit tags">✎</button>
+      <button class="btn small" data-act="playGroup" data-gi="${gi}">Play</button></summary>
+      <div class="tracks"></div></details>`;
   });
   if (!lib.tracks.size) html += '<p class="status">No audio files found in this folder. Try another folder.</p>';
   $('libraryBody').innerHTML = html;
+  $('libraryBody').querySelectorAll('details[open]').forEach(fillTracks);
   markPlaying(); observeLazy();
 }
+function fillTracks(d){
+  if (d.dataset.filled) return;
+  const g = curGroups[+d.dataset.gi]; if (!g) return;
+  const view = $('viewSel').value;
+  d.querySelector('.tracks').innerHTML = g.tracks.map((t, i) => {
+    const a = tg(t), who = view !== 'artist' && a.a ? `<em>${esc(a.a)}</em>` : '';
+    return `<div class="trk"><button class="track" data-act="playTrack" data-gi="${d.dataset.gi}" data-id="${esc(t.id)}"><small>${a.n || i + 1}</small><span>${esc(tTitle(t))}${who}</span></button>
+      <button class="mini" data-act="addTo" data-id="${esc(t.id)}" title="Add to playlist" aria-label="Add to playlist">＋</button>
+      <button class="mini" data-act="editTags" data-id="${esc(t.id)}" title="Edit tags" aria-label="Edit tags">✎</button></div>`;
+  }).join('');
+  d.dataset.filled = '1'; markPlaying();
+}
+$('libraryBody').addEventListener('toggle', e => { if (e.target.matches && e.target.matches('details.album') && e.target.open) fillTracks(e.target); }, true);
+
 let st; $('search').addEventListener('input', () => { clearTimeout(st); st = setTimeout(renderLibrary, 150); });
+$('viewSel').value = store.get('view') || 'folders'; $('sortSel').value = store.get('sort') || 'default';
+$('viewSel').addEventListener('change', () => { store.set('view', $('viewSel').value); sel.clear(); updateDlBtn(); renderLibrary(); });
+$('sortSel').addEventListener('change', () => { store.set('sort', $('sortSel').value); renderLibrary(); });
 $('changeFolder').addEventListener('click', openPicker);
 $('rescan').addEventListener('click', () => { const r = store.get('root'); if (r) openLibrary(r.id, r.name, true); });
-$('shuffleAll').addEventListener('click', () => { shuffle = true; syncToggles(); setQueue([...lib.tracks.values()], Math.floor(Math.random() * lib.tracks.size), 'All music'); });
-
-$('libraryBody').addEventListener('click', async e => {
-  const el = e.target.closest('[data-act]'); if (!el) return;
-  e.preventDefault(); e.stopPropagation();
-  const act = el.dataset.act;
-  if (act === 'playFolder'){ const f = lib.folders.get(el.dataset.f); setQueue(f.tracks, 0, f.name); }
-  else if (act === 'playTrack'){ const f = lib.folders.get(el.dataset.f); setQueue(f.tracks, f.tracks.findIndex(t => t.id === el.dataset.id), f.name); }
-  else if (act === 'playlist'){ playPlaylist(lib.playlists.find(p => p.id === el.dataset.id)); }
+$('readTags').addEventListener('click', readAllTags);
+$('newPl').addEventListener('click', () => openPlaylistEditor(null));
+$('dlBtn').addEventListener('click', openDownloadDialog);
+$('shuffleAll').addEventListener('click', () => {
+  if (!lib.tracks.size) return;
+  shuffle = true; syncToggles(); setQueue([...lib.tracks.values()], Math.floor(Math.random() * lib.tracks.size), 'All music');
 });
 
-/* ---------- Playlist files (.m3u / .m3u8 / .pls) ---------- */
-async function playPlaylist(p){
-  $('libStatus').textContent = `Loading playlist “${p.title}”…`;
-  try {
-    if (stale(p)) await refreshUrl(p);
-    let text;
-    try { text = await (await fetch(p.url)).text(); }
-    catch(_){ text = await (await fetch(`${GRAPH}${itemPath(p.id)}/content`, { headers: { Authorization: 'Bearer ' + await getToken() } })).text(); }
-    const names = parsePlaylist(text, p.name);
-    const byName = new Map();
-    lib.tracks.forEach(t => { const k = t.name.toLowerCase(); (byName.get(k) || byName.set(k, []).get(k)).push(t); });
-    const out = []; let missing = 0;
-    names.forEach(n => {
-      const c = byName.get(n);
-      if (!c) { missing++; return; }
-      out.push(c.find(t => t.folder === p.folder) || c[0]);
-    });
-    if (!out.length){ $('libStatus').textContent = `No tracks from “${p.title}” were found in the selected folder.`; return; }
-    $('libStatus').textContent = `Playing “${p.title}”` + (missing ? ` (${missing} entries not found in this folder)` : '');
-    setQueue(out, 0, p.title);
-  } catch(e){ $('libStatus').textContent = 'Could not load playlist: ' + e.message; }
+function updateDlBtn(){ $('dlBtn').classList.toggle('hidden', !sel.size); $('dlBtn').textContent = `Download (${sel.size})`; }
+$('libraryBody').addEventListener('change', e => {
+  const el = e.target; if (el.type !== 'checkbox') return;
+  if (el.dataset.act === 'sel'){
+    const g = curGroups[+el.dataset.gi], key = `g:${$('viewSel').value}:${g.key}`;
+    if (el.checked) sel.set(key, { name: g.name, tracks: g.tracks }); else sel.delete(key);
+  } else if (el.dataset.act === 'selP'){
+    const p = lib.playlists.find(x => x.id === el.dataset.id), key = 'p:' + p.id;
+    if (el.checked) sel.set(key, { name: p.title, playlist: p }); else sel.delete(key);
+  }
+  updateDlBtn();
+});
+$('libraryBody').addEventListener('click', async e => {
+  const el = e.target.closest('[data-act]'); if (!el || el.type === 'checkbox') return;
+  e.preventDefault(); e.stopPropagation();
+  const act = el.dataset.act, g = el.dataset.gi !== undefined ? curGroups[+el.dataset.gi] : null;
+  const byId = id => lib.tracks.get(id);
+  if (act === 'playGroup') setQueue(g.tracks, 0, g.name);
+  else if (act === 'playTrack') setQueue(g.tracks, g.tracks.findIndex(t => t.id === el.dataset.id), g.name);
+  else if (act === 'playlist') playPlaylist(lib.playlists.find(p => p.id === el.dataset.id));
+  else if (act === 'editPlaylist') openPlaylistEditor(lib.playlists.find(p => p.id === el.dataset.id));
+  else if (act === 'addTo') openAddTo(byId(el.dataset.id));
+  else if (act === 'editTags') openTagEditor([byId(el.dataset.id)]);
+  else if (act === 'editGroup') openTagEditor(g.tracks);
+});
+
+/* ---------- Playlists (.m3u / .m3u8 / .pls) ---------- */
+async function playlistTracks(p){
+  if (p.tracks) return p.tracks;
+  const text = await fetchText(p);
+  p.tracks = resolveEntries(text, p);
+  return p.tracks;
 }
-function parsePlaylist(text, filename){
+function resolveEntries(text, p){
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  let entries;
-  if (/\.pls$/i.test(filename)) entries = lines.filter(l => /^file\d+=/i.test(l)).map(l => l.replace(/^file\d+=/i, ''));
-  else entries = lines.filter(l => !l.startsWith('#'));
-  return entries.map(e => {
-    let n = e.split(/[\\/]/).pop();
-    try { n = decodeURIComponent(n); } catch(_){}
-    return n.toLowerCase();
+  const entries = /\.pls$/i.test(p.name) ? lines.filter(l => /^file\d+=/i.test(l)).map(l => l.replace(/^file\d+=/i, '')) : lines.filter(l => !l.startsWith('#'));
+  const out = []; let missing = 0;
+  entries.forEach(e => {
+    let s = e.replace(/^file:\/\/\/?/i, ''); try { s = decodeURIComponent(s); } catch(_){}
+    s = s.replace(/\\/g, '/');
+    let t = null;
+    if (!/^([a-z]:)?\//i.test(s)){
+      const parts = p.folder ? p.folder.split('/') : [];
+      for (const seg of s.split('/')){ if (seg === '..') parts.pop(); else if (seg && seg !== '.') parts.push(seg); }
+      t = lib.byPath.get(parts.join('/').toLowerCase());
+    }
+    if (!t){
+      const c = lib.byName.get(s.split('/').pop().toLowerCase());
+      t = c && (c.find(x => x.folder === p.folder) || c[0]);
+    }
+    if (t) out.push(t); else missing++;
   });
+  p.missing = missing;
+  return out;
+}
+async function playPlaylist(p){
+  flash(`Loading playlist “${p.title}”…`);
+  try {
+    const tr = await playlistTracks(p);
+    if (!tr.length){ flash(`No tracks from “${p.title}” were found in the selected folder.`); return; }
+    flash(`Playing “${p.title}”` + (p.missing ? ` (${p.missing} entries not found in this folder)` : ''));
+    setQueue(tr, 0, p.title);
+  } catch(e){ flash('Could not load playlist: ' + e.message); }
+}
+function relPath(fromFolder, toPath){
+  const a = fromFolder ? fromFolder.split('/') : [], b = toPath.split('/'); let i = 0;
+  while (i < a.length && i < b.length - 1 && a[i].toLowerCase() === b[i].toLowerCase()) i++;
+  return '../'.repeat(a.length - i) + b.slice(i).join('/');
+}
+function buildM3U(folder, tracks){
+  const lines = ['#EXTM3U'];
+  tracks.forEach(t => { const a = tArtist(t); lines.push(`#EXTINF:-1,${a ? a + ' - ' : ''}${tTitle(t)}`); lines.push(relPath(folder, t.path)); });
+  return lines.join('\r\n') + '\r\n';
+}
+async function savePlaylist(p, name, tracks){
+  const root = store.get('root');
+  if (p){
+    await gsend(`${itemPath(p.id)}/content`, 'PUT', buildM3U(p.folder, tracks), 'text/plain');
+    p.tracks = tracks.slice(); p.missing = 0;
+  } else {
+    const base = safe(name || 'New playlist'); let fname = base + '.m3u8', n = 2;
+    const exists = f => lib.playlists.some(x => !x.folder && x.name.toLowerCase() === f.toLowerCase());
+    while (exists(fname)) fname = `${base} (${n++}).m3u8`;
+    const r = await gsend(`${itemPath(root.id)}:/${encodeURIComponent(fname)}:/content`, 'PUT', buildM3U('', tracks), 'text/plain');
+    p = { id: r.id, name: fname, title: fname.replace(/\.[^.]+$/, ''), folder: '', path: fname, url: '', urlAt: 0, tracks: tracks.slice() };
+    lib.playlists.push(p); lib.playlists.sort((a, b) => cmpS(a.name, b.name));
+  }
+  indexLib(); lib.at = Date.now(); renderLibrary(); saveIndexQuiet();
+  return p;
+}
+function openAddTo(t){
+  const list = lib.playlists.map(p => `<button class="btn" data-d="pick" data-id="${esc(p.id)}">${esc(p.title)}</button>`).join('');
+  openDlg(`<h2>Add to playlist</h2><p class="muted">${esc(tTitle(t))}</p>
+    <div class="dlist">${list || '<p class="muted">No playlists yet.</p>'}</div>
+    <div class="dbtns"><button class="btn primary" data-d="new">New playlist…</button><button class="btn" data-d="close">Cancel</button></div>`, {
+    pick: async el => {
+      const p = lib.playlists.find(x => x.id === el.dataset.id); dlg.close();
+      try { const tr = (await playlistTracks(p)).slice(); tr.push(t); await savePlaylist(p, null, tr); flash(`Added to “${p.title}”`); }
+      catch(e){ flash('Could not save playlist: ' + e.message); }
+    },
+    new: async () => {
+      const n = prompt('Playlist name'); if (!n) return; dlg.close();
+      try { await savePlaylist(null, n, [t]); flash(`Created playlist “${n}”`); }
+      catch(e){ flash('Could not create playlist: ' + e.message); }
+    }
+  });
+}
+async function openPlaylistEditor(p){
+  openDlg(`<h2>${p ? 'Edit playlist' : 'New playlist'}</h2><p class="muted">Loading…</p>`);
+  let tracks = [];
+  if (p){ try { tracks = (await playlistTracks(p)).slice(); } catch(e){ flash('Could not load playlist: ' + e.message); dlg.close(); return; } }
+  const rowHtml = (t, i) => `<div class="drow"><span class="grow">${i + 1}. ${esc(tTitle(t))}${tArtist(t) ? ' <em>' + esc(tArtist(t)) + '</em>' : ''}</span>
+      <button class="mini" data-d="up" data-i="${i}" aria-label="Move up">↑</button><button class="mini" data-d="down" data-i="${i}" aria-label="Move down">↓</button><button class="mini" data-d="rm" data-i="${i}" aria-label="Remove">✕</button></div>`;
+  const drawList = () => { $('edList').innerHTML = tracks.map(rowHtml).join('') || '<p class="muted">Empty. Search below to add tracks.</p>'; };
+  const drawResults = () => {
+    const q = $('edSearch').value.trim().toLowerCase();
+    if (!q){ $('edResults').innerHTML = ''; return; }
+    const out = []; for (const t of lib.tracks.values()){
+      const a = tg(t); if ([tTitle(t), a.a, a.al, t.name].some(x => x && String(x).toLowerCase().includes(q))){ out.push(t); if (out.length >= 25) break; }
+    }
+    $('edResults').innerHTML = out.map(t => `<div class="drow"><span class="grow">${esc(tTitle(t))}${tArtist(t) ? ' <em>' + esc(tArtist(t)) + '</em>' : ''}</span><button class="btn small" data-d="add" data-id="${esc(t.id)}">Add</button></div>`).join('') || '<p class="muted">No matches.</p>';
+  };
+  openDlg(`<h2>${p ? 'Edit playlist' : 'New playlist'}</h2>
+    ${p ? `<p class="muted">${esc(p.name)}${p.missing ? ' · ' + p.missing + ' entries could not be matched and will be dropped on save' : ''}</p>` : '<input class="field" id="edName" placeholder="Playlist name" autocomplete="off">'}
+    <div class="dlist" id="edList"></div>
+    <input class="field" id="edSearch" type="search" placeholder="Search tracks to add" autocomplete="off">
+    <div class="dlist" id="edResults"></div>
+    <div class="status" id="edMsg"></div>
+    <div class="dbtns"><button class="btn primary" data-d="save">Save</button><button class="btn" data-d="play">Play</button><button class="btn" data-d="addq">Add current queue</button>
+      ${p ? '<button class="btn" data-d="del">Delete</button>' : ''}<button class="btn" data-d="close">Close</button></div>`, {
+    up: el => { const i = +el.dataset.i; if (i > 0){ [tracks[i-1], tracks[i]] = [tracks[i], tracks[i-1]]; drawList(); } },
+    down: el => { const i = +el.dataset.i; if (i < tracks.length - 1){ [tracks[i+1], tracks[i]] = [tracks[i], tracks[i+1]]; drawList(); } },
+    rm: el => { tracks.splice(+el.dataset.i, 1); drawList(); },
+    add: el => { tracks.push(lib.tracks.get(el.dataset.id)); drawList(); },
+    addq: () => { tracks.push(...queue); drawList(); },
+    play: () => { if (tracks.length){ dlg.close(); setQueue(tracks.slice(), 0, p ? p.title : 'New playlist'); } },
+    input: e => { if (e.target.id === 'edSearch') drawResults(); },
+    save: async () => {
+      const name = p ? null : $('edName').value.trim();
+      if (!p && !name){ $('edMsg').textContent = 'Enter a name first.'; return; }
+      $('edMsg').textContent = 'Saving…';
+      try { await savePlaylist(p, name, tracks); dlg.close(); flash('Playlist saved'); }
+      catch(e){ $('edMsg').textContent = 'Could not save: ' + e.message; }
+    },
+    del: async () => {
+      if (!confirm(`Delete “${p.name}” from OneDrive?`)) return;
+      try { await gsend(itemPath(p.id), 'DELETE'); lib.playlists = lib.playlists.filter(x => x !== p); sel.delete('p:' + p.id); updateDlBtn(); lib.at = Date.now(); renderLibrary(); saveIndexQuiet(); dlg.close(); flash('Playlist deleted'); }
+      catch(e){ $('edMsg').textContent = 'Could not delete: ' + e.message; }
+    }
+  });
+  drawList();
+}
+
+/* ---------- Tag editor ---------- */
+const TAG_FIELDS = [['t','Title',1],['a','Artist'],['aa','Album artist'],['al','Album'],['g','Genre'],['y','Year'],['n','Track no. (e.g. 3 or 3/12)',1],['d','Disc no.']];
+async function openTagEditor(tracks){
+  if (!tracks.length) return;
+  openDlg('<h2>Edit tags</h2><p class="muted">Reading current tags…</p>');
+  for (const t of tracks){ if (!t.tags){ try { await readTags(t); } catch(e){ flash('Could not read tags: ' + e.message); dlg.close(); return; } } }
+  const multi = tracks.length > 1, init = {}; let inputs = '';
+  TAG_FIELDS.forEach(([k, label, single]) => {
+    if (multi && single) return;
+    const vals = new Set(tracks.map(t => String(tg(t)[k] ?? '')));
+    init[k] = vals.size === 1 ? [...vals][0] : '';
+    inputs += `<label class="flabel">${label}<input class="field" id="tf_${k}" value="${esc(init[k])}" placeholder="${vals.size > 1 ? '(multiple values)' : ''}" autocomplete="off"></label>`;
+  });
+  openDlg(`<h2>Edit tags</h2>
+    <p class="muted">${multi ? `Applies to ${tracks.length} tracks. Leave a field unchanged to keep each track’s own value.` : esc(tracks[0].name)}<br>Saving rewrites the MP3 file in your OneDrive.</p>
+    ${inputs}<div class="status" id="tmsg"></div>
+    <div class="dbtns"><button class="btn primary" data-d="save">Save</button><button class="btn" data-d="close">Cancel</button></div>`, {
+    save: async el => {
+      const ch = {};
+      Object.keys(init).forEach(k => { const v = $('tf_' + k).value.trim(); if (v !== init[k]) ch[k] = v; });
+      if (!Object.keys(ch).length){ dlg.close(); return; }
+      dlg.querySelectorAll('button').forEach(b => b.disabled = true);
+      const errs = []; let i = 0;
+      for (const t of tracks){
+        $('tmsg').textContent = `Writing ${++i}/${tracks.length}: ${t.name}`;
+        try { await writeTags(t, ch); } catch(e){ errs.push(`${t.name}: ${e.message}`); }
+      }
+      lib.at = Date.now(); renderLibrary(); await saveIndexQuiet();
+      if (errs.length){
+        $('tmsg').innerHTML = esc(`${tracks.length - errs.length} saved, ${errs.length} failed:`) + '<br>' + errs.slice(0, 5).map(esc).join('<br>');
+        dlg.querySelectorAll('button').forEach(b => b.disabled = false);
+      } else { dlg.close(); flash(`Tags saved for ${tracks.length} track${multi ? 's' : ''}`); }
+    }
+  });
+}
+
+/* ---------- Download to a local folder (or ZIP) ---------- */
+const crcTable = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++){ let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(u8){ let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = crcTable[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+class Zip {
+  constructor(){ this.parts = []; this.entries = []; this.offset = 0; const d = new Date(); this.time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1); this.date = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate(); }
+  async add(name, blob){
+    const nameB = new TextEncoder().encode(name), data = new Uint8Array(await blob.arrayBuffer()), crc = crc32(data);
+    if (this.offset + data.length > 0xF0000000) throw new Error('ZIP would exceed 4 GB; download fewer items at once');
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true);
+    h.setUint16(10, this.time, true); h.setUint16(12, this.date, true); h.setUint32(14, crc, true);
+    h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, nameB.length, true); h.setUint16(28, 0, true);
+    this.parts.push(h.buffer, nameB, blob);
+    this.entries.push({ nameB, crc, size: data.length, offset: this.offset });
+    this.offset += 30 + nameB.length + data.length;
+  }
+  finish(){
+    const cdStart = this.offset; let cdSize = 0;
+    for (const e of this.entries){
+      const h = new DataView(new ArrayBuffer(46));
+      h.setUint32(0, 0x02014b50, true); h.setUint16(4, 20, true); h.setUint16(6, 20, true); h.setUint16(8, 0x0800, true); h.setUint16(10, 0, true);
+      h.setUint16(12, this.time, true); h.setUint16(14, this.date, true); h.setUint32(16, e.crc, true);
+      h.setUint32(20, e.size, true); h.setUint32(24, e.size, true); h.setUint16(28, e.nameB.length, true);
+      h.setUint32(42, e.offset, true);
+      this.parts.push(h.buffer, e.nameB); cdSize += 46 + e.nameB.length;
+    }
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, this.entries.length, true); end.setUint16(10, this.entries.length, true);
+    end.setUint32(12, cdSize, true); end.setUint32(16, cdStart, true);
+    this.parts.push(end.buffer);
+    return new Blob(this.parts, { type: 'application/zip' });
+  }
+}
+const canPickDir = typeof window.showDirectoryPicker === 'function';
+function openDownloadDialog(){
+  const units = [...sel.values()];
+  const names = units.map(u => esc(u.name)).slice(0, 6).join(', ') + (units.length > 6 ? ` and ${units.length - 6} more` : '');
+  openDlg(`<h2>Download</h2><p class="muted">${units.length} selected: ${names}</p>
+    <label class="opt"><input type="radio" name="dmode" value="artist" checked> <span><b>Artist / Album folders</b><br><small>Artist/Album/original file name, using each file’s tags</small></span></label>
+    <label class="opt"><input type="radio" name="dmode" value="named"> <span><b>One folder per playlist or album</b><br><small>Folder named after the playlist or album, files numbered 01, 02, 03… in order</small></span></label>
+    <p class="muted">${canPickDir ? 'Your browser can save straight into a folder you choose.' : 'Your browser can’t write to a folder directly, so you’ll get a single ZIP file with the same folder structure.'}</p>
+    <div class="status" id="dprog"></div>
+    <div class="dbtns"><button class="btn primary" data-d="start">${canPickDir ? 'Choose folder & start' : 'Start download'}</button><button class="btn" data-d="clear">Clear selection</button><button class="btn" data-d="close">Close</button></div>`, {
+    clear: () => { sel.clear(); updateDlBtn(); renderLibrary(); dlg.close(); },
+    start: async el => {
+      const mode = dlg.querySelector('input[name=dmode]:checked').value;
+      let dir = null;
+      if (canPickDir){
+        try { dir = await window.showDirectoryPicker({ mode: 'readwrite' }); }
+        catch(e){ return; }
+      }
+      el.disabled = true;
+      const job = { cancel: false }; dlgH.onclose = () => { job.cancel = true; };
+      dlg.querySelector('[data-d=clear]').disabled = true;
+      try { await runDownload(mode, dir, job); } catch(e){ $('dprog').textContent = 'Download failed: ' + e.message; }
+      el.disabled = false;
+    }
+  });
+}
+async function runDownload(mode, dir, job){
+  const prog = m => { $('dprog').innerHTML = m; };
+  prog('Preparing…');
+  const units = [];
+  for (const u of sel.values()) units.push({ name: u.name, tracks: u.playlist ? await playlistTracks(u.playlist) : u.tracks });
+  const jobs = [];
+  if (mode === 'artist'){
+    const need = []; const seen0 = new Set();
+    units.forEach(u => u.tracks.forEach(t => { if (!t.tags && !seen0.has(t.id)){ seen0.add(t.id); need.push(t); } }));
+    let k = 0;
+    const w = async () => { while (!job.cancel){ const t = need[k++]; if (!t) return; try { await readTags(t); } catch(e){} prog(`Reading tags ${Math.min(k, need.length)}/${need.length}…`); } };
+    if (need.length) await Promise.all(Array.from({ length: 4 }, w));
+    const seen = new Set();
+    units.forEach(u => u.tracks.forEach(t => {
+      if (seen.has(t.id)) return; seen.add(t.id);
+      const g = tg(t);
+      jobs.push({ t, path: [g.aa || g.a || 'Unknown artist', g.al || 'Unknown album', t.name] });
+    }));
+  } else {
+    const used = new Set();
+    units.forEach(u => {
+      let fn = safe(u.name), n = 2; while (used.has(fn.toLowerCase())) fn = `${safe(u.name)} (${n++})`; used.add(fn.toLowerCase());
+      const w = Math.max(2, String(u.tracks.length).length);
+      u.tracks.forEach((t, i) => jobs.push({ t, path: [fn, String(i + 1).padStart(w, '0') + ' - ' + t.name] }));
+    });
+  }
+  if (!jobs.length){ prog('Nothing to download.'); return; }
+  const zip = dir ? null : new Zip(); const errs = []; let done = 0;
+  for (const j of jobs){
+    if (job.cancel) break;
+    prog(`${done}/${jobs.length} · ${esc(j.path[j.path.length - 1])}`);
+    try {
+      const res = await fetchFile(j.t);
+      if (dir){
+        let d = dir; for (const seg of j.path.slice(0, -1)) d = await d.getDirectoryHandle(safe(seg), { create: true });
+        const fh = await d.getFileHandle(safe(j.path[j.path.length - 1]), { create: true });
+        const w = await fh.createWritable();
+        try { await res.body.pipeTo(w); } catch(e){ try { await w.abort(); } catch(_){} throw e; }
+      } else {
+        await zip.add(j.path.map(safe).join('/'), await res.blob());
+      }
+    } catch(e){ errs.push(`${j.t.name}: ${e.message}`); }
+    done++;
+  }
+  if (!dir && !job.cancel && done > errs.length){
+    const url = URL.createObjectURL(zip.finish());
+    const a = document.createElement('a'); a.href = url; a.download = 'MP3 Player download.zip'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+  prog(`${job.cancel ? 'Cancelled' : 'Finished'}: ${done - errs.length} of ${jobs.length} files ${dir ? 'saved' : 'added to the ZIP'}.` + (errs.length ? '<br>' + errs.slice(0, 5).map(esc).join('<br>') + (errs.length > 5 ? `<br>…and ${errs.length - 5} more` : '') : ''));
 }
 
 /* ---------- Player ---------- */
 const audio = $('audio');
 let queue = [], qi = -1, shuffle = false, repeat = 0, queueName = '', retried = false;
-const fmt = s => isFinite(s) ? Math.floor(s/60) + ':' + String(Math.floor(s%60)).padStart(2,'0') : '0:00';
 
 function setQueue(tracks, startIndex, name){
   queue = tracks.slice(); queueName = name || ''; $('player').classList.remove('hidden');
@@ -495,7 +1142,7 @@ async function playAt(i, resumeAt){
   if (!resumeAt) retried = false;
   showNow(t); markPlaying();
   try { if (stale(t)) await refreshUrl(t); }
-  catch(e){ $('libStatus').textContent = 'Could not get a link for this track: ' + e.message; return; }
+  catch(e){ flash('Could not get a link for this track: ' + e.message); return; }
   audio.src = t.url;
   if (resumeAt) audio.addEventListener('loadedmetadata', () => { audio.currentTime = resumeAt; }, { once: true });
   audio.play().catch(()=>{});
@@ -512,12 +1159,14 @@ function prev(){ if (audio.currentTime > 3) audio.currentTime = 0; else playAt(q
 function stopPlayback(){ audio.pause(); audio.removeAttribute('src'); queue = []; qi = -1; }
 
 function showNow(t){
-  $('nowTitle').textContent = t.title; $('nowSub').textContent = `${t.folder.split('/').pop() || ''}${queueName && queueName !== t.folder.split('/').pop() ? ' · ' + queueName : ''}`;
+  const g = tg(t), fold = t.folder.split('/').pop() || '';
+  $('nowTitle').textContent = tTitle(t);
+  $('nowSub').textContent = [g.a, g.al || fold, queueName && queueName !== (g.al || fold) ? queueName : ''].filter(Boolean).join(' · ');
   const f = lib.folders.get(t.folder), c = f && coverOf(f);
   $('nowCover').outerHTML = imgTag(c, 'cover', 'nowCover');
   if (c && !c.url) refreshUrl(c).then(u => { const el = $('nowCover'); if (el && el.tagName === 'IMG') el.src = u; }).catch(() => {});
   if ('mediaSession' in navigator){
-    navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.folder.split('/').pop() || 'MP3 Player', album: queueName,
+    navigator.mediaSession.metadata = new MediaMetadata({ title: tTitle(t), artist: g.a || fold || 'MP3 Player', album: g.al || queueName,
       artwork: c && c.url ? [{ src: c.url }] : [] });
   }
 }
