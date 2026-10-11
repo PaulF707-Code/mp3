@@ -25,7 +25,7 @@ h1{font-size:1.35rem;font-weight:800;margin:0;letter-spacing:-.02em}
 .btn:hover{border-color:var(--accent)}
 .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .btn.small{padding:5px 12px;font-size:.85rem}
-main{max-width:860px;margin:0 auto;padding:18px}
+main{max-width:1280px;margin:0 auto;padding:18px}
 .hidden{display:none!important}
 .hero{padding:48px 0 24px}
 .hero h2{font-size:clamp(1.9rem,7vw,3rem);line-height:1.05;margin:0 0 14px;font-weight:800;letter-spacing:-.03em}
@@ -39,7 +39,7 @@ main{max-width:860px;margin:0 auto;padding:18px}
 .list .row{display:flex;width:100%;align-items:center;gap:12px;background:none;border:0;text-align:left;padding:12px 4px}
 .list .row:hover{background:var(--surface)}
 .bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
-.bar input[type=search]{flex:1;min-width:140px;background:var(--surface-solid);border:1px solid var(--line);color:var(--text);padding:9px 14px;border-radius:999px;font:inherit}
+#search{flex:1;min-width:0;max-width:560px;background:var(--surface-solid);border:1px solid var(--line);color:var(--text);padding:9px 14px;border-radius:999px;font:inherit}
 h3{font-size:1.05rem;margin:26px 0 8px;font-weight:600;color:var(--muted)}
 details.album{border-bottom:1px solid var(--line)}
 details.album summary{display:flex;align-items:center;gap:14px;padding:12px 4px;cursor:pointer;list-style:none}
@@ -54,7 +54,7 @@ details.album summary::-webkit-details-marker{display:none}
 .track.playing{color:var(--accent)}
 .track small{color:var(--muted);min-width:1.8em;text-align:right}
 #player{position:fixed;left:0;right:0;bottom:0;background:var(--surface-solid);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));z-index:10}
-#player .inner{max-width:860px;margin:0 auto;display:grid;grid-template-columns:auto 1fr auto;gap:6px 14px;align-items:center}
+#player .inner{max-width:1280px;margin:0 auto;display:grid;grid-template-columns:auto 1fr auto;gap:6px 14px;align-items:center}
 #player .cover{width:52px;height:52px;grid-row:span 2}
 #nowTitle{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #nowSub{color:var(--muted);font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -98,6 +98,34 @@ header .ico{font-size:1.35rem;width:44px;height:44px}
 .opt{display:flex;gap:10px;align-items:flex-start;margin:10px 0;cursor:pointer}
 .opt small{color:var(--muted)}
 .opt input{margin-top:4px;accent-color:var(--accent)}
+.panes{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:20px;align-items:start}
+.pane{min-width:0;min-height:320px;max-height:calc(100dvh - 250px);overflow-y:auto;border:1px solid var(--line);border-radius:12px;padding:0 12px 10px}
+.pane > .bar,.pane > .seggroup{position:sticky;top:0;background:var(--bg);z-index:2;padding:12px 0 8px;margin:0}
+.seggroup,.stabs,.mtabs{display:flex;gap:8px}
+.stabs{margin:10px 0}
+.mtabs{display:none;margin:0 0 12px}
+.seg{border:1px solid var(--line);background:transparent;border-radius:999px;padding:7px 14px;font-weight:600}
+.seg.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.blist{min-height:140px;border:1px dashed var(--line);border-radius:10px;margin-top:8px}
+.blist .hint{padding:28px 14px;text-align:center}
+.brow{display:flex;align-items:center;gap:6px;padding:4px 6px;border-bottom:1px solid var(--line);cursor:grab}
+.brow .bn{color:var(--muted);min-width:2.2em;text-align:right;font-size:.85rem}
+.brow .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brow em{color:var(--muted);font-style:normal;font-size:.85em;margin-left:6px}
+.brow.dropbefore{box-shadow:0 -2px 0 var(--accent)}
+.brow.dropafter{box-shadow:0 2px 0 var(--accent)}
+.blist.dropend{box-shadow:inset 0 -2px 0 var(--accent)}
+.trk[draggable=true],summary[draggable=true]{cursor:grab}
+.linkbtn{background:none;border:0;padding:0;color:var(--accent);text-decoration:underline;font:inherit;cursor:pointer}
+.erow{padding:6px 8px;border-bottom:1px solid var(--line);font-size:.85rem}
+.erow b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:819px){
+  .panes{display:block}
+  .pane{max-height:none;overflow:visible;border:0;padding:0}
+  .pane > .bar,.pane > .seggroup{position:static}
+  .mtabs{display:flex}
+  .panes[data-pane="left"] #rightPane,.panes[data-pane="right"] #leftPane{display:none}
+}
 @media (max-width:560px){
   #player .inner{grid-template-columns:auto 1fr}
   .ctl{grid-column:1/-1;grid-row:auto;justify-content:center}
@@ -112,6 +140,7 @@ header .ico{font-size:1.35rem;width:44px;height:44px}
 <body>
 <header>
   <h1>PMMP3</h1>
+  <input type="search" id="search" class="hidden" placeholder="Search tracks, artists, albums" aria-label="Search">
   <button class="ico" id="settingsBtn" title="Settings" aria-label="Settings">⚙</button>
 </header>
 
@@ -135,29 +164,30 @@ header .ico{font-size:1.35rem;width:44px;height:44px}
 
   <!-- Library -->
   <section id="vLibrary" class="hidden">
-    <div class="bar">
-      <input type="search" id="search" placeholder="Search tracks, artists, albums" aria-label="Search">
-      <button class="btn small" id="shuffleAll">Shuffle all</button>
-    </div>
-    <div class="bar">
-      <label class="sel">View
-        <select id="viewSel">
-          <option value="folders">Folders</option><option value="artist">Artist</option><option value="album">Album</option>
-          <option value="genre">Genre</option><option value="year">Year</option><option value="all">All tracks</option>
-        </select></label>
-      <label class="sel">Sort
-        <select id="sortSel">
-          <option value="default">Default</option><option value="title">Title</option><option value="artist">Artist</option>
-          <option value="album">Album</option><option value="year">Year</option><option value="genre">Genre</option>
-        </select></label>
-    </div>
-    <div class="bar">
-      <button class="btn small" id="newPl">New playlist</button>
-      <button class="btn small primary hidden" id="dlBtn">Download (0)</button>
-    </div>
     <div class="status" id="libStatus"></div>
     <div class="status" id="tagStatus"></div>
-    <div id="libraryBody"></div>
+    <div class="mtabs"><button class="seg on" id="mtabLib" data-m="left">Library</button><button class="seg" id="mtabLists" data-m="right">Lists</button></div>
+    <div class="panes" id="panes" data-pane="left">
+      <div class="pane" id="leftPane">
+        <div class="bar">
+          <label class="sel">View
+            <select id="viewSel">
+              <option value="folders">Folders</option><option value="artist">Artist</option><option value="album">Album</option>
+              <option value="genre">Genre</option><option value="year">Year</option><option value="all">All tracks</option>
+            </select></label>
+          <label class="sel">Sort
+            <select id="sortSel">
+              <option value="default">Default</option><option value="title">Title</option><option value="artist">Artist</option>
+              <option value="album">Album</option><option value="year">Year</option><option value="genre">Genre</option>
+            </select></label>
+        </div>
+        <div id="libraryBody"></div>
+      </div>
+      <div class="pane" id="rightPane">
+        <div class="seggroup"><button class="seg on" id="tabPl" data-ra="tabPl">Playlists</button><button class="seg" id="tabBuild" data-ra="tabBuild">Build list (0)</button></div>
+        <div id="rightBody"></div>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -375,7 +405,7 @@ async function uploadReplace(item, blob){
 }
 
 /* ---------- Views ---------- */
-function show(id){ ['vSignedOut','vPicker','vLibrary'].forEach(v => $(v).classList.toggle('hidden', v !== id)); }
+function show(id){ ['vSignedOut','vPicker','vLibrary'].forEach(v => $(v).classList.toggle('hidden', v !== id)); $('search').classList.toggle('hidden', id !== 'vLibrary'); }
 
 /* ---------- Folder picker ---------- */
 let pickStack = [{ id:'root', name:'OneDrive' }];
@@ -427,7 +457,9 @@ const flash = setStatus;
 // Files: {id,pid,name,k:'t'|'p'|'i',sz,...}. Paths, folders and track lists are derived by rebuild().
 const emptyLib = () => ({ nodes: new Map(), folders: new Map(), playlists: [], tracks: new Map(), byPath: new Map(), byName: new Map(), at: 0, rid: '', rootName: '', delta: '' });
 let lib = emptyLib();
-const sel = new Map();   // selected groups / playlists for download
+// The working list in the right panel: build it up, reorder it, then save it as a playlist or download it.
+const build = { name: '', editing: null, items: [] };
+let rightTab = 'playlists';
 let curGroups = [];
 
 const kindOf = name => AUDIO_RE.test(name) ? 't' : LIST_RE.test(name) ? 'p' : IMG_RE.test(name) ? 'i' : null;
@@ -492,6 +524,8 @@ function rebuild(){
   });
   lib.folders.forEach(f => { f.tracks.sort((a, b) => cmpS(a.name, b.name)); f.images.sort((a, b) => cmpS(a.name, b.name)); });
   lib.playlists.sort((a, b) => cmpS(a.name, b.name));
+  build.items = build.items.map(t => lib.tracks.get(t.id)).filter(Boolean);   // keep the list pointing at current track objects
+  if (build.editing) build.editing = lib.nodes.get(build.editing.id) || null;
   indexLib();
 }
 function indexLib(){
@@ -547,7 +581,7 @@ async function scan(rootId, rootName, seed){
   if (rootFailed && nodes.size === 1){ openPicker(); return; }
   lib = Object.assign(emptyLib(), { nodes, at: Date.now(), rid, rootName, delta });
   resetTagQueue();
-  rebuild(); sel.clear(); updateDlBtn(); renderLibrary();
+  rebuild(); renderLibrary();
   enqueueTagScan(pendingTracks());          // tags fill in behind the scenes; the library is usable now
   setStatus(libSummary() + ' · saving index…');
   if (await saveIndexQuiet()) setStatus(libSummary() + ' · index saved to OneDrive' + (delta ? '' : ' (quick update not available)'));
@@ -628,7 +662,7 @@ async function quickUpdate(){
     if (st.added || st.removed || st.changed){
       lib.at = Date.now(); rebuild();
       purgeTracks([...before].filter(id => !lib.tracks.has(id)));
-      sel.clear(); updateDlBtn(); renderLibrary();
+      renderLibrary();
       enqueueTagScan(st.newTracks);
       await saveIndexQuiet();
     }
@@ -956,7 +990,7 @@ async function tagWorker(gen){
 function tagQueueIdle(){
   tagWorkersRunning = false;
   if (tagSaveDirty){ tagSaveDirty = false; saveIndexQuiet(); }
-  if (tagRenderDirty){ tagRenderDirty = false; if (lib.tracks.size) renderLibrary(); }
+  if (tagRenderDirty){ tagRenderDirty = false; if (lib.tracks.size){ renderLibrary(); const a = document.activeElement; if (!a || a.id !== 'bName') renderRight(); } }
   updateTagStatus(true);
 }
 function retryFailedTags(){
@@ -984,6 +1018,7 @@ async function readTagsFirst(tracks, job, progress){
 function purgeTracks(ids){
   if (!ids.length) return;
   const gone = new Set(ids);
+  build.items = build.items.filter(t => !gone.has(t.id));
   lib.playlists.forEach(p => { if (p.tracks) p.tracks = p.tracks.filter(t => !gone.has(t.id)); });
   if (queue.length){
     const cur = queue[qi];
@@ -993,18 +1028,18 @@ function purgeTracks(ids){
 }
 const n0 = x => x.toLocaleString();
 function tagCounts(){
-  const c = { complete: 0, empty: 0, pending: 0, error: 0 }, errs = new Map();
+  const c = { complete: 0, empty: 0, pending: 0, error: 0, list: [] }, errs = new Map();
   lib.tracks.forEach(t => {
     const s = (!t.tagState || t.tagState === 'reading') ? 'pending' : t.tagState; c[s]++;
-    if (s === 'error'){ const m = t.tagError || 'unknown error'; errs.set(m, (errs.get(m) || 0) + 1); }
+    if (s === 'error'){ c.list.push(t); const m = t.tagError || 'unknown error'; errs.set(m, (errs.get(m) || 0) + 1); }
   });
   c.top = [...errs].sort((a, b) => b[1] - a[1])[0];
   return c;
 }
 function updateTagStatus(now){
   if (!now){ if (!tsTimer) tsTimer = setTimeout(() => { tsTimer = null; updateTagStatus(true); }, 300); return; }
-  const a = document.getElementById('tagStatus'), b = document.getElementById('setTag'), rb = document.getElementById('retryBtn');
-  if (!a && !b && !rb) return;
+  const a = document.getElementById('tagStatus'), b = document.getElementById('setTag'), rb = document.getElementById('retryBtn'), el = document.getElementById('errList'), eh = document.getElementById('errHead');
+  if (!a && !b && !rb && !el) return;
   const c = tagCounts();
   if (a){
     a.textContent = (c.pending || c.error || tagPaused)
@@ -1015,6 +1050,16 @@ function updateTagStatus(now){
   if (b) b.textContent = `Tracks: ${n0(lib.tracks.size)}\nTag scan:\n${n0(c.complete)} complete\n${n0(c.empty)} no tags found\n${n0(c.pending)} pending\n${n0(c.error)} errors` +
     (c.top ? `\nMost common error: ${c.top[0]} (×${c.top[1]})` : '') + (tagPaused ? '\nPaused after repeated failures.' : '');
   if (rb) rb.classList.toggle('hidden', !c.error);
+  if (eh) eh.textContent = `Files with tag errors (${n0(c.error)})`;
+  if (el){
+    const sig = c.list.map(t => t.id + t.tagError).join('|');
+    if (sig !== el.dataset.sig){
+      el.dataset.sig = sig;
+      el.innerHTML = c.list.length
+        ? c.list.slice(0, 150).map(t => `<div class="erow"><b title="${esc(t.path || t.name)}">${esc(t.name)}</b><span class="muted">${esc(t.folder || '(top folder)')} · ${esc(t.tagError || 'unknown error')}</span><br><button class="linkbtn" data-d="reveal" data-id="${esc(t.id)}">Show in library</button> · <button class="linkbtn" data-d="od" data-id="${esc(t.id)}">Open in OneDrive</button></div>`).join('') + (c.list.length > 150 ? `<p class="muted">…and ${n0(c.list.length - 150)} more</p>` : '')
+        : '<p class="muted">No errors.</p>';
+    }
+  }
 }
 
 /* ---------- Grouping / sorting / rendering ---------- */
@@ -1077,7 +1122,7 @@ function buildGroups(q){
 }
 function imgTag(item, cls, id){
   if (!item) return `<div class="${cls}" ${id ? `id="${id}"` : ''}>♪</div>`;
-  return `<img class="${cls}" alt="" ${id?`id="${id}"`:''} ${item.url ? `src="${esc(item.url)}"` : ''} data-img="${esc(item.id)}">`;
+  return `<img class="${cls}" alt="" draggable="false" ${id?`id="${id}"`:''} ${item.url ? `src="${esc(item.url)}"` : ''} data-img="${esc(item.id)}">`;
 }
 document.addEventListener('error', async e => {           // refresh expired image links once
   const img = e.target; if (!(img instanceof HTMLImageElement) || !img.dataset.img || img.dataset.retry) return;
@@ -1098,23 +1143,15 @@ function renderLibrary(){
   const q = $('search').value.trim().toLowerCase(), view = $('viewSel').value;
   curGroups = buildGroups(q);
   let html = '';
-  if (lib.playlists.length && !q){
-    html += '<h3>Playlists</h3><ul class="list">' + lib.playlists.map(p =>
-      `<li class="prow"><input type="checkbox" class="chk" data-act="selP" data-id="${esc(p.id)}" aria-label="Select ${esc(p.title)}" ${sel.has('p:' + p.id) ? 'checked' : ''}>
-        <button class="row" data-act="playlist" data-id="${esc(p.id)}"><span class="cover" style="width:36px;height:36px;font-size:1rem">≡</span><span class="meta"><b>${esc(p.title)}</b><span>${p.tracks ? p.tracks.length + ' tracks' : esc(p.folder || 'Top folder')}</span></span></button>
-        <button class="btn small" data-act="editPlaylist" data-id="${esc(p.id)}">Edit</button></li>`).join('') + '</ul>';
-  }
-  html += `<h3>${VIEW_TITLES[view]}</h3>`;
   if (view !== 'folders'){
     let waiting = 0; lib.tracks.forEach(t => { if (t.tagState === 'pending' || t.tagState === 'reading') waiting++; });
     if (waiting) html += `<p class="status">Tags are still being read for ${n0(waiting)} tracks; this view refreshes when they finish.</p>`;
   }
   curGroups.forEach((g, gi) => {
-    const checked = sel.has(`g:${view}:${g.key}`) ? 'checked' : '';
-    html += `<details class="album" data-gi="${gi}" ${q ? 'open' : ''}><summary>
-      <input type="checkbox" class="chk" data-act="sel" data-gi="${gi}" aria-label="Select ${esc(g.name)}" ${checked}>
+    html += `<details class="album" data-gi="${gi}" ${q ? 'open' : ''}><summary draggable="true" data-drag="group" data-gi="${gi}">
       ${imgTag(g.cover, 'cover')}
       <span class="meta"><b>${esc(g.name)}</b><span>${g.sub ? esc(g.sub) + ' · ' : ''}${g.tracks.length} tracks</span></span>
+      <button class="mini" data-act="addGroup" data-gi="${gi}" title="Add to list" aria-label="Add to list">＋</button>
       <button class="mini" data-act="editGroup" data-gi="${gi}" title="Edit tags for these tracks" aria-label="Edit tags">✎</button>
       <button class="btn small" data-act="playGroup" data-gi="${gi}">Play</button></summary>
       <div class="tracks"></div></details>`;
@@ -1130,50 +1167,157 @@ function fillTracks(d){
   const view = $('viewSel').value;
   d.querySelector('.tracks').innerHTML = g.tracks.map((t, i) => {
     const a = tg(t), who = view !== 'artist' && a.a ? `<em>${esc(a.a)}</em>` : '';
-    return `<div class="trk"><button class="track" data-act="playTrack" data-gi="${d.dataset.gi}" data-id="${esc(t.id)}"><small>${a.n || i + 1}</small><span>${esc(tTitle(t))}${who}</span></button>
-      <button class="mini" data-act="addTo" data-id="${esc(t.id)}" title="Add to playlist" aria-label="Add to playlist">＋</button>
+    return `<div class="trk" draggable="true" data-drag="track" data-gi="${d.dataset.gi}" data-id="${esc(t.id)}"><button class="track" data-act="playTrack" data-gi="${d.dataset.gi}" data-id="${esc(t.id)}"><small>${a.n || i + 1}</small><span>${esc(tTitle(t))}${who}</span></button>
+      <button class="mini" data-act="addTo" data-id="${esc(t.id)}" title="Add to list" aria-label="Add to list">＋</button>
       <button class="mini" data-act="editTags" data-id="${esc(t.id)}" title="Edit tags" aria-label="Edit tags">✎</button></div>`;
   }).join('');
   d.dataset.filled = '1'; markPlaying();
 }
 $('libraryBody').addEventListener('toggle', e => { if (e.target.matches && e.target.matches('details.album') && e.target.open) fillTracks(e.target); }, true);
 
-let st; $('search').addEventListener('input', () => { clearTimeout(st); st = setTimeout(renderLibrary, 150); });
+let st; $('search').addEventListener('input', () => { clearTimeout(st); st = setTimeout(() => { renderLibrary(); if (rightTab === 'playlists') renderRight(); }, 150); });
 $('viewSel').value = store.get('view') || 'folders'; $('sortSel').value = store.get('sort') || 'default';
-$('viewSel').addEventListener('change', () => { store.set('view', $('viewSel').value); sel.clear(); updateDlBtn(); renderLibrary(); });
+$('viewSel').addEventListener('change', () => { store.set('view', $('viewSel').value); renderLibrary(); });
 $('sortSel').addEventListener('change', () => { store.set('sort', $('sortSel').value); renderLibrary(); });
-$('newPl').addEventListener('click', () => openPlaylistEditor(null));
-$('dlBtn').addEventListener('click', openDownloadDialog);
-$('shuffleAll').addEventListener('click', () => {
-  if (!lib.tracks.size) return;
-  shuffle = true; syncToggles(); setQueue([...lib.tracks.values()], Math.floor(Math.random() * lib.tracks.size), 'All music');
-});
-
-function updateDlBtn(){ $('dlBtn').classList.toggle('hidden', !sel.size); $('dlBtn').textContent = `Download (${sel.size})`; }
-$('libraryBody').addEventListener('change', e => {
-  const el = e.target; if (el.type !== 'checkbox') return;
-  if (el.dataset.act === 'sel'){
-    const g = curGroups[+el.dataset.gi], key = `g:${$('viewSel').value}:${g.key}`;
-    if (el.checked) sel.set(key, { name: g.name, tracks: g.tracks }); else sel.delete(key);
-  } else if (el.dataset.act === 'selP'){
-    const p = lib.playlists.find(x => x.id === el.dataset.id), key = 'p:' + p.id;
-    if (el.checked) sel.set(key, { name: p.title, playlist: p }); else sel.delete(key);
-  }
-  updateDlBtn();
-});
-$('libraryBody').addEventListener('click', async e => {
-  const el = e.target.closest('[data-act]'); if (!el || el.type === 'checkbox') return;
+function setPane(p){ $('panes').dataset.pane = p; $('mtabLib').classList.toggle('on', p === 'left'); $('mtabLists').classList.toggle('on', p === 'right'); }
+document.querySelectorAll('.mtabs [data-m]').forEach(b => b.addEventListener('click', () => setPane(b.dataset.m === 'left' ? 'left' : 'right')));
+$('libraryBody').addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
   e.preventDefault(); e.stopPropagation();
   const act = el.dataset.act, g = el.dataset.gi !== undefined ? curGroups[+el.dataset.gi] : null;
-  const byId = id => lib.tracks.get(id);
   if (act === 'playGroup') setQueue(g.tracks, 0, g.name);
   else if (act === 'playTrack') setQueue(g.tracks, g.tracks.findIndex(t => t.id === el.dataset.id), g.name);
-  else if (act === 'playlist') playPlaylist(lib.playlists.find(p => p.id === el.dataset.id));
-  else if (act === 'editPlaylist') openPlaylistEditor(lib.playlists.find(p => p.id === el.dataset.id));
-  else if (act === 'addTo') openAddTo(byId(el.dataset.id));
-  else if (act === 'editTags') openTagEditor([byId(el.dataset.id)]);
+  else if (act === 'addGroup') addToBuild(g.tracks.slice());
+  else if (act === 'addTo') addToBuild([lib.tracks.get(el.dataset.id)]);
+  else if (act === 'editTags') openTagEditor([lib.tracks.get(el.dataset.id)]);
   else if (act === 'editGroup') openTagEditor(g.tracks);
 });
+// Show a folder from the Settings error list: switch to the Folders view and open it.
+function revealFolder(path){
+  show('vLibrary'); setPane('left');
+  $('search').value = ''; $('viewSel').value = 'folders'; store.set('view', 'folders'); renderLibrary();
+  const d = [...document.querySelectorAll('#libraryBody details.album')].find(x => (curGroups[+x.dataset.gi] || {}).key === path);
+  if (!d){ flash('That folder was not found in the library.'); return; }
+  d.open = true; fillTracks(d); d.scrollIntoView({ block: 'center' });
+}
+
+/* ---------- Right panel: playlists, and the list builder ---------- */
+function setRightTab(t){ rightTab = t; renderRight(); }
+function addToBuild(tracks, at){
+  tracks = tracks.filter(Boolean); if (!tracks.length) return;
+  const i = at == null ? build.items.length : Math.max(0, Math.min(at, build.items.length));
+  build.items = build.items.slice(0, i).concat(tracks, build.items.slice(i));
+  renderRight(); flash(`Added ${tracks.length} track${tracks.length === 1 ? '' : 's'} to the list (${build.items.length} in total)`);
+}
+function renderRight(){
+  const body = $('rightBody'); if (!body) return;
+  $('tabPl').classList.toggle('on', rightTab === 'playlists'); $('tabBuild').classList.toggle('on', rightTab === 'build');
+  const n = build.items.length;
+  $('tabBuild').textContent = `Build list (${n})`; $('mtabLists').textContent = n ? `Lists (${n})` : 'Lists';
+  if (rightTab === 'playlists'){
+    const q = $('search').value.trim().toLowerCase();
+    const list = lib.playlists.filter(p => !q || p.title.toLowerCase().includes(q));
+    body.innerHTML = list.length ? '<ul class="list">' + list.map(p =>
+      `<li class="prow"><button class="row" data-ra="playPl" data-id="${esc(p.id)}"><span class="cover" style="width:36px;height:36px;font-size:1rem">≡</span><span class="meta"><b>${esc(p.title)}</b><span>${p.tracks ? p.tracks.length + ' tracks' : esc(p.folder || 'Top folder')}</span></span></button>
+        <button class="btn small" data-ra="addPl" data-id="${esc(p.id)}" title="Add all its tracks to the list">＋ Add</button>
+        <button class="btn small" data-ra="editPl" data-id="${esc(p.id)}">Edit</button></li>`).join('') + '</ul>'
+      : `<p class="muted" style="padding:14px 4px">${q ? 'No playlists match.' : 'No playlists yet. Use the Build list tab to make one.'}</p>`;
+    return;
+  }
+  const ed = build.editing;
+  const rows = build.items.map((t, i) => `<div class="brow" draggable="true" data-bi="${i}"><span class="bn">${i + 1}</span><span class="grow">${esc(tTitle(t))}${tArtist(t) ? '<em>' + esc(tArtist(t)) + '</em>' : ''}</span>
+    <button class="mini" data-ra="up" data-i="${i}" aria-label="Move up">↑</button><button class="mini" data-ra="down" data-i="${i}" aria-label="Move down">↓</button><button class="mini" data-ra="rm" data-i="${i}" aria-label="Remove">✕</button></div>`).join('');
+  body.innerHTML = `<div style="padding-top:6px">
+    <input class="field" id="bName" placeholder="Playlist name" autocomplete="off" value="${esc(build.name)}">
+    ${ed ? `<p class="muted">Editing “${esc(ed.title)}”. Save overwrites it; Save as new uses the name above.${ed.missing ? ' ' + ed.missing + ' entries could not be matched and will be dropped.' : ''}</p>` : ''}
+    <div class="dbtns" style="margin-top:4px">
+      <button class="btn small primary" data-ra="bSave">${ed ? 'Save' : 'Save as playlist'}</button>
+      ${ed ? '<button class="btn small" data-ra="bSaveNew">Save as new</button>' : ''}
+      <button class="btn small" data-ra="bPlay">Play</button><button class="btn small" data-ra="bDl">Download…</button><button class="btn small" data-ra="bClear">Clear</button>
+      ${ed ? '<button class="btn small" data-ra="bDel">Delete playlist</button>' : ''}
+    </div><div class="status" id="bMsg"></div></div>
+    <div class="blist" id="bList">${rows || '<p class="muted hint">Drag songs, albums or folders here from the library, or tap ＋. Add existing playlists from the Playlists tab.</p>'}</div>`;
+}
+const rp = $('rightPane');
+rp.addEventListener('click', async e => {
+  const el = e.target.closest('[data-ra]'); if (!el) return;
+  const a = el.dataset.ra, i = +el.dataset.i, p = el.dataset.id ? lib.playlists.find(x => x.id === el.dataset.id) : null;
+  const msg = m => { const x = $('bMsg'); if (x) x.textContent = m; };
+  if (a === 'tabPl') setRightTab('playlists');
+  else if (a === 'tabBuild') setRightTab('build');
+  else if (a === 'playPl' && p) playPlaylist(p);
+  else if (a === 'addPl' && p){
+    try { const tr = await playlistTracks(p); addToBuild(tr.slice()); if (p.missing) flash(`${p.missing} entries of “${p.title}” were not found in this folder`); }
+    catch(err){ flash('Could not load playlist: ' + err.message); }
+  }
+  else if (a === 'editPl' && p){
+    if (build.items.length && !confirm('Replace the current list with this playlist?')) return;
+    try { const tr = await playlistTracks(p); build.items = tr.slice(); build.editing = p; build.name = p.title; setRightTab('build'); }
+    catch(err){ flash('Could not load playlist: ' + err.message); }
+  }
+  else if (a === 'up'){ if (i > 0){ [build.items[i-1], build.items[i]] = [build.items[i], build.items[i-1]]; renderRight(); } }
+  else if (a === 'down'){ if (i < build.items.length - 1){ [build.items[i+1], build.items[i]] = [build.items[i], build.items[i+1]]; renderRight(); } }
+  else if (a === 'rm'){ build.items.splice(i, 1); renderRight(); }
+  else if (a === 'bClear'){ build.items = []; build.editing = null; build.name = ''; renderRight(); }
+  else if (a === 'bPlay'){ if (build.items.length) setQueue(build.items.slice(), 0, build.name.trim() || 'My list'); else msg('The list is empty.'); }
+  else if (a === 'bDl') openDownloadDialog();
+  else if (a === 'bSave' || a === 'bSaveNew'){
+    const asNew = a === 'bSaveNew' || !build.editing, name = build.name.trim();
+    if (asNew && !name){ msg('Enter a name first.'); return; }
+    if (!build.items.length){ msg('The list is empty.'); return; }
+    msg('Saving…');
+    try {
+      const sp = await savePlaylist(asNew ? null : build.editing, asNew ? name : null, build.items.slice());
+      build.editing = sp; build.name = sp.title; renderRight(); msg(`Saved “${sp.title}”`);
+    } catch(err){ msg('Could not save: ' + err.message); }
+  }
+  else if (a === 'bDel'){
+    const d = build.editing; if (!d || !confirm(`Delete “${d.name}” from OneDrive?`)) return;
+    try {
+      await gsend(itemPath(d.id), 'DELETE'); lib.nodes.delete(d.id); lib.playlists = lib.playlists.filter(x => x !== d);
+      build.editing = null; lib.at = Date.now(); renderLibrary(); saveIndexQuiet(); renderRight(); flash('Playlist deleted');
+    } catch(err){ msg('Could not delete: ' + err.message); }
+  }
+});
+rp.addEventListener('input', e => { if (e.target.id === 'bName') build.name = e.target.value; });
+
+/* ---------- Drag and drop (mouse): library -> list, and reordering inside the list ---------- */
+let dragData = null;
+function clearDrop(){ document.querySelectorAll('.dropbefore,.dropafter,.dropend').forEach(x => x.classList.remove('dropbefore', 'dropafter', 'dropend')); }
+function dropIndex(e){
+  const row = e.target.closest && e.target.closest('.brow'); if (!row) return build.items.length;
+  const r = row.getBoundingClientRect(), i = +row.dataset.bi;
+  return e.clientY < r.top + r.height / 2 ? i : i + 1;
+}
+$('libraryBody').addEventListener('dragstart', e => {
+  const el = e.target.closest && e.target.closest('[data-drag]'); if (!el) return;
+  const g = curGroups[+el.dataset.gi]; if (!g) return;
+  dragData = { kind: 'add', tracks: el.dataset.drag === 'group' ? g.tracks.slice() : [lib.tracks.get(el.dataset.id)] };
+  e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData('text/plain', 'pmmp3');
+});
+rp.addEventListener('dragstart', e => {
+  const r = e.target.closest && e.target.closest('.brow'); if (!r) return;
+  dragData = { kind: 'move', from: +r.dataset.bi };
+  e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'pmmp3');
+});
+rp.addEventListener('dragenter', () => { if (dragData && rightTab !== 'build') setRightTab('build'); });   // hovering the panel switches to the list
+rp.addEventListener('dragover', e => {
+  if (!dragData || rightTab !== 'build') return;
+  e.preventDefault(); clearDrop();
+  const row = e.target.closest('.brow');
+  if (row){ const r = row.getBoundingClientRect(); row.classList.add(e.clientY < r.top + r.height / 2 ? 'dropbefore' : 'dropafter'); }
+  else { const l = $('bList'); if (l) l.classList.add('dropend'); }
+});
+rp.addEventListener('dragleave', e => { if (!rp.contains(e.relatedTarget)) clearDrop(); });
+rp.addEventListener('drop', e => {
+  if (!dragData || rightTab !== 'build') return;
+  e.preventDefault();
+  const d = dragData, at = dropIndex(e); dragData = null; clearDrop();
+  if (d.kind === 'move'){
+    const [it] = build.items.splice(d.from, 1); build.items.splice(at > d.from ? at - 1 : at, 0, it); renderRight();
+  } else addToBuild(d.tracks, at);
+});
+document.addEventListener('dragend', () => { dragData = null; clearDrop(); });
 
 /* ---------- Playlists (.m3u / .m3u8 / .pls) ---------- */
 async function playlistTracks(p){
@@ -1223,6 +1367,21 @@ function buildM3U(folder, tracks){
   tracks.forEach(t => { const a = tArtist(t); lines.push(`#EXTINF:-1,${a ? a + ' - ' : ''}${tTitle(t)}`); lines.push(relPath(folder, t.path)); });
   return lines.join('\r\n') + '\r\n';
 }
+// Folder (inside the music folder) where NEW playlists are saved; set in Settings. Falls back to the music folder itself.
+function folderPathById(id){
+  if (id === lib.rid) return '';
+  const parts = []; let cur = lib.nodes.get(id);
+  while (cur && cur.id !== lib.rid){ parts.unshift(cur.name); cur = cur.pid != null ? lib.nodes.get(cur.pid) : null; }
+  return cur ? parts.join('/') : null;
+}
+function plTarget(){
+  const c = store.get('plFolder'), root = store.get('root');
+  if (c && root && c.rootId === root.id && lib.nodes.get(c.id)){
+    const path = folderPathById(c.id);
+    if (path !== null) return { id: c.id, path, ok: true };
+  }
+  return { id: root.id, path: '', ok: !c || !root || c.rootId !== root.id };
+}
 async function savePlaylist(p, name, tracks){
   const root = store.get('root');
   if (p){
@@ -1230,78 +1389,16 @@ async function savePlaylist(p, name, tracks){
     p.tracks = tracks.slice(); p.missing = 0;
   } else {
     const base = safe(name || 'New playlist'); let fname = base + '.m3u8', n = 2;
-    const exists = f => lib.playlists.some(x => !x.folder && x.name.toLowerCase() === f.toLowerCase());
+    const tgt = plTarget();
+    const exists = f => lib.playlists.some(x => (x.folder || '') === tgt.path && x.name.toLowerCase() === f.toLowerCase());
     while (exists(fname)) fname = `${base} (${n++}).m3u8`;
-    const r = await gsend(`${itemPath(root.id)}:/${encodeURIComponent(fname)}:/content`, 'PUT', buildM3U('', tracks), 'text/plain');
-    p = { id: r.id, pid: lib.rid, k: 'p', sz: 0, name: fname, title: fname.replace(/\.[^.]+$/, ''), folder: '', path: fname, url: '', urlAt: 0, tracks: tracks.slice() };
+    const r = await gsend(`${itemPath(tgt.id)}:/${encodeURIComponent(fname)}:/content`, 'PUT', buildM3U(tgt.path, tracks), 'text/plain');
+    p = { id: r.id, pid: tgt.path ? tgt.id : lib.rid, k: 'p', sz: 0, name: fname, title: fname.replace(/\.[^.]+$/, ''), folder: tgt.path, path: tgt.path ? tgt.path + '/' + fname : fname, url: '', urlAt: 0, tracks: tracks.slice() };
     lib.nodes.set(p.id, p); lib.playlists.push(p); lib.playlists.sort((a, b) => cmpS(a.name, b.name));
   }
-  indexLib(); lib.at = Date.now(); renderLibrary(); saveIndexQuiet();
+  indexLib(); lib.at = Date.now(); renderLibrary(); renderRight(); saveIndexQuiet();
   return p;
 }
-function openAddTo(t){
-  const list = lib.playlists.map(p => `<button class="btn" data-d="pick" data-id="${esc(p.id)}">${esc(p.title)}</button>`).join('');
-  openDlg(`<h2>Add to playlist</h2><p class="muted">${esc(tTitle(t))}</p>
-    <div class="dlist">${list || '<p class="muted">No playlists yet.</p>'}</div>
-    <div class="dbtns"><button class="btn primary" data-d="new">New playlist…</button><button class="btn" data-d="close">Cancel</button></div>`, {
-    pick: async el => {
-      const p = lib.playlists.find(x => x.id === el.dataset.id); dlg.close();
-      try { const tr = (await playlistTracks(p)).slice(); tr.push(t); await savePlaylist(p, null, tr); flash(`Added to “${p.title}”`); }
-      catch(e){ flash('Could not save playlist: ' + e.message); }
-    },
-    new: async () => {
-      const n = prompt('Playlist name'); if (!n) return; dlg.close();
-      try { await savePlaylist(null, n, [t]); flash(`Created playlist “${n}”`); }
-      catch(e){ flash('Could not create playlist: ' + e.message); }
-    }
-  });
-}
-async function openPlaylistEditor(p){
-  openDlg(`<h2>${p ? 'Edit playlist' : 'New playlist'}</h2><p class="muted">Loading…</p>`);
-  let tracks = [];
-  if (p){ try { tracks = (await playlistTracks(p)).slice(); } catch(e){ flash('Could not load playlist: ' + e.message); dlg.close(); return; } }
-  const rowHtml = (t, i) => `<div class="drow"><span class="grow">${i + 1}. ${esc(tTitle(t))}${tArtist(t) ? ' <em>' + esc(tArtist(t)) + '</em>' : ''}</span>
-      <button class="mini" data-d="up" data-i="${i}" aria-label="Move up">↑</button><button class="mini" data-d="down" data-i="${i}" aria-label="Move down">↓</button><button class="mini" data-d="rm" data-i="${i}" aria-label="Remove">✕</button></div>`;
-  const drawList = () => { $('edList').innerHTML = tracks.map(rowHtml).join('') || '<p class="muted">Empty. Search below to add tracks.</p>'; };
-  const drawResults = () => {
-    const q = $('edSearch').value.trim().toLowerCase();
-    if (!q){ $('edResults').innerHTML = ''; return; }
-    const out = []; for (const t of lib.tracks.values()){
-      const a = tg(t); if ([tTitle(t), a.a, a.al, t.name].some(x => x && String(x).toLowerCase().includes(q))){ out.push(t); if (out.length >= 25) break; }
-    }
-    $('edResults').innerHTML = out.map(t => `<div class="drow"><span class="grow">${esc(tTitle(t))}${tArtist(t) ? ' <em>' + esc(tArtist(t)) + '</em>' : ''}</span><button class="btn small" data-d="add" data-id="${esc(t.id)}">Add</button></div>`).join('') || '<p class="muted">No matches.</p>';
-  };
-  openDlg(`<h2>${p ? 'Edit playlist' : 'New playlist'}</h2>
-    ${p ? `<p class="muted">${esc(p.name)}${p.missing ? ' · ' + p.missing + ' entries could not be matched and will be dropped on save' : ''}</p>` : '<input class="field" id="edName" placeholder="Playlist name" autocomplete="off">'}
-    <div class="dlist" id="edList"></div>
-    <input class="field" id="edSearch" type="search" placeholder="Search tracks to add" autocomplete="off">
-    <div class="dlist" id="edResults"></div>
-    <div class="status" id="edMsg"></div>
-    <div class="dbtns"><button class="btn primary" data-d="save">Save</button><button class="btn" data-d="play">Play</button><button class="btn" data-d="addq">Add current queue</button>
-      ${p ? '<button class="btn" data-d="del">Delete</button>' : ''}<button class="btn" data-d="close">Close</button></div>`, {
-    up: el => { const i = +el.dataset.i; if (i > 0){ [tracks[i-1], tracks[i]] = [tracks[i], tracks[i-1]]; drawList(); } },
-    down: el => { const i = +el.dataset.i; if (i < tracks.length - 1){ [tracks[i+1], tracks[i]] = [tracks[i], tracks[i+1]]; drawList(); } },
-    rm: el => { tracks.splice(+el.dataset.i, 1); drawList(); },
-    add: el => { tracks.push(lib.tracks.get(el.dataset.id)); drawList(); },
-    addq: () => { tracks.push(...queue); drawList(); },
-    play: () => { if (tracks.length){ dlg.close(); setQueue(tracks.slice(), 0, p ? p.title : 'New playlist'); } },
-    input: e => { if (e.target.id === 'edSearch') drawResults(); },
-    save: async () => {
-      const name = p ? null : $('edName').value.trim();
-      if (!p && !name){ $('edMsg').textContent = 'Enter a name first.'; return; }
-      $('edMsg').textContent = 'Saving…';
-      try { await savePlaylist(p, name, tracks); dlg.close(); flash('Playlist saved'); }
-      catch(e){ $('edMsg').textContent = 'Could not save: ' + e.message; }
-    },
-    del: async () => {
-      if (!confirm(`Delete “${p.name}” from OneDrive?`)) return;
-      try { await gsend(itemPath(p.id), 'DELETE'); lib.nodes.delete(p.id); lib.playlists = lib.playlists.filter(x => x !== p); sel.delete('p:' + p.id); updateDlBtn(); lib.at = Date.now(); renderLibrary(); saveIndexQuiet(); dlg.close(); flash('Playlist deleted'); }
-      catch(e){ $('edMsg').textContent = 'Could not delete: ' + e.message; }
-    }
-  });
-  drawList();
-}
-
 /* ---------- Tag editor ---------- */
 const TAG_FIELDS = [['t','Title',1],['a','Artist'],['aa','Album artist'],['al','Album'],['g','Genre'],['y','Year'],['n','Track no. (e.g. 3 or 3/12)',1],['d','Disc no.']];
 async function openTagEditor(tracks){
@@ -1383,15 +1480,14 @@ class Zip {
 }
 const canPickDir = typeof window.showDirectoryPicker === 'function';
 function openDownloadDialog(){
-  const units = [...sel.values()];
-  const names = units.map(u => esc(u.name)).slice(0, 6).join(', ') + (units.length > 6 ? ` and ${units.length - 6} more` : '');
-  openDlg(`<h2>Download</h2><p class="muted">${units.length} selected: ${names}</p>
+  if (!build.items.length){ flash('Add some tracks to the list first.'); const x = $('bMsg'); if (x) x.textContent = 'The list is empty.'; return; }
+  const listName = build.name.trim() || 'Playlist';
+  openDlg(`<h2>Download</h2><p class="muted">${build.items.length} tracks from “${esc(listName)}”</p>
     <label class="opt"><input type="radio" name="dmode" value="artist" checked> <span><b>Artist / Album folders</b><br><small>Artist/Album/original file name, using each file’s tags</small></span></label>
-    <label class="opt"><input type="radio" name="dmode" value="named"> <span><b>One folder per playlist or album</b><br><small>Folder named after the playlist or album, files numbered 01, 02, 03… in order</small></span></label>
+    <label class="opt"><input type="radio" name="dmode" value="named"> <span><b>Playlist format</b><br><small>One folder named “${esc(safe(listName))}”, files numbered 01, 02, 03… in the list’s order</small></span></label>
     <p class="muted">${canPickDir ? 'Your browser can save straight into a folder you choose.' : 'Your browser can’t write to a folder directly, so you’ll get a single ZIP file with the same folder structure.'}</p>
     <div class="status" id="dprog"></div>
-    <div class="dbtns"><button class="btn primary" data-d="start">${canPickDir ? 'Choose folder & start' : 'Start download'}</button><button class="btn" data-d="clear">Clear selection</button><button class="btn" data-d="close">Close</button></div>`, {
-    clear: () => { sel.clear(); updateDlBtn(); renderLibrary(); dlg.close(); },
+    <div class="dbtns"><button class="btn primary" data-d="start">${canPickDir ? 'Choose folder & start' : 'Start download'}</button><button class="btn" data-d="close">Close</button></div>`, {
     start: async el => {
       const mode = dlg.querySelector('input[name=dmode]:checked').value;
       let dir = null;
@@ -1401,7 +1497,6 @@ function openDownloadDialog(){
       }
       el.disabled = true;
       const job = { cancel: false }; dlgH.onclose = () => { job.cancel = true; };
-      dlg.querySelector('[data-d=clear]').disabled = true;
       try { await runDownload(mode, dir, job); } catch(e){ $('dprog').textContent = 'Download failed: ' + e.message; }
       el.disabled = false;
     }
@@ -1410,8 +1505,7 @@ function openDownloadDialog(){
 async function runDownload(mode, dir, job){
   const prog = m => { $('dprog').innerHTML = m; };
   prog('Preparing…');
-  const units = [];
-  for (const u of sel.values()) units.push({ name: u.name, tracks: u.playlist ? await playlistTracks(u.playlist) : u.tracks });
+  const units = [{ name: build.name.trim() || 'Playlist', tracks: build.items.slice() }];
   const jobs = [];
   if (mode === 'artist'){
     const all = []; const seen0 = new Set();
@@ -1537,28 +1631,72 @@ if ('mediaSession' in navigator){
   navigator.mediaSession.setActionHandler('nexttrack', () => next(false));
 }
 
-/* ---------- Settings (account, folder, library maintenance, appearance) ---------- */
-function openSettings(){
+/* ---------- Settings: two tabs (Library details / Account & appearance) ---------- */
+let settingsTab = 'library';
+function openPlFolderDialog(){
+  const folders = [...lib.nodes.values()].filter(n => n.d && n.id !== lib.rid).map(n => ({ id: n.id, path: folderPathById(n.id) })).filter(f => f.path).sort((a, b) => cmpS(a.path, b.path));
+  openDlg(`<h2>Playlist folder</h2><p class="muted">New playlists are saved in the folder you pick. It must be inside your music folder so they stay part of the library.</p>
+    <div class="dlist">${folders.map(f => `<button class="btn" data-d="plpick" data-id="${esc(f.id)}">${esc(f.path)}</button>`).join('') || '<p class="muted">No subfolders yet. Create one below.</p>'}</div>
+    <div class="status" id="plMsg"></div>
+    <div class="dbtns"><button class="btn primary" data-d="plnew">New folder…</button><button class="btn" data-d="plback">Back</button></div>`, {
+    plpick: el => { const r = store.get('root'); store.set('plFolder', { rootId: r.id, id: el.dataset.id }); openSettings('account'); },
+    plnew: async () => {
+      const name = prompt('New folder name', 'Playlists'); if (!name || !name.trim()) return;
+      try {
+        const r = store.get('root');
+        const d = await gsend(`${itemPath(lib.rid)}/children`, 'POST', { name: safe(name), folder: {}, '@microsoft.graph.conflictBehavior': 'fail' });
+        lib.nodes.set(d.id, { id: d.id, pid: lib.rid, name: d.name, d: 1 }); rebuild(); renderLibrary(); saveIndexQuiet();
+        store.set('plFolder', { rootId: r.id, id: d.id }); openSettings('account');
+      } catch(e){ $('plMsg').textContent = /409/.test(e.message) ? 'A folder with that name already exists in the music folder; pick it from the list.' : 'Could not create the folder: ' + e.message; }
+    },
+    plback: () => openSettings('account')
+  });
+}
+function openSettings(tab){
+  if (typeof tab === 'string') settingsTab = tab;
   const r = store.get('root'), signed = !!tok, dark = document.documentElement.dataset.theme === 'dark';
+  const which = signed ? settingsTab : 'account';
   let h = '<h2>Settings</h2>';
-  h += '<div class="sgroup"><h3>Account</h3>' + (signed
-    ? `<p>Signed in${userName ? ' as <b>' + esc(userName) + '</b>' : ''}</p><div class="dbtns"><button class="btn small" data-d="signout">Sign out</button></div>`
-    : '<p class="muted">Not signed in.</p><div class="dbtns"><button class="btn small primary" data-d="signin">Sign in with Microsoft</button></div>') + '</div>';
-  if (signed){
-    h += `<div class="sgroup"><h3>Music folder</h3><p>${r ? esc(r.name) : 'None selected'}</p><div class="dbtns"><button class="btn small" data-d="folder">Change folder</button></div></div>`;
-    h += `<div class="sgroup"><h3>Library status</h3><p class="muted">Last updated: ${lib.at ? esc(new Date(lib.at).toLocaleString()) : 'never'}<br>Changes are checked automatically when the app opens. Quick update: ${lib.delta ? 'ready' : 'needs one full rescan first'}</p>
-      <p class="muted" id="setTag" style="white-space:pre-line"></p>
-      <div class="dbtns"><button class="btn small primary" data-d="quick" ${lib.delta ? '' : 'disabled'}>Update changes</button><button class="btn small" data-d="full">Full rescan</button><button class="btn small hidden" id="retryBtn" data-d="retry">Retry failed tags</button></div></div>`;
+  if (signed) h += `<div class="stabs"><button class="seg ${which === 'library' ? 'on' : ''}" data-d="tab" data-t="library">Library</button><button class="seg ${which === 'account' ? 'on' : ''}" data-d="tab" data-t="account">Account &amp; appearance</button></div>`;
+  if (which === 'library'){
+    h += `<div class="sgroup"><h3>Library</h3><p class="muted">${libSummary()}<br>Last updated: ${lib.at ? esc(new Date(lib.at).toLocaleString()) : 'never'}<br>Changes are checked automatically when the app opens. Quick update: ${lib.delta ? 'ready' : 'needs one full rescan first'}</p>
+      <div class="dbtns"><button class="btn small primary" data-d="quick" ${lib.delta ? '' : 'disabled'}>Update changes</button><button class="btn small" data-d="full">Full rescan</button></div></div>
+      <div class="sgroup"><h3>Tag scan</h3><p class="muted" id="setTag" style="white-space:pre-line"></p>
+      <div class="dbtns"><button class="btn small hidden" id="retryBtn" data-d="retry">Retry failed tags</button></div></div>
+      <div class="sgroup"><h3 id="errHead">Files with tag errors</h3><div class="dlist" id="errList" style="display:block"></div></div>`;
+  } else {
+    h += '<div class="sgroup"><h3>Account</h3>' + (signed
+      ? `<p>Signed in${userName ? ' as <b>' + esc(userName) + '</b>' : ''}</p><div class="dbtns"><button class="btn small" data-d="signout">Sign out</button></div>`
+      : '<p class="muted">Not signed in.</p><div class="dbtns"><button class="btn small primary" data-d="signin">Sign in with Microsoft</button></div>') + '</div>';
+    if (signed) h += `<div class="sgroup"><h3>Music folder</h3><p>${r ? esc(r.name) : 'None selected'}</p><div class="dbtns"><button class="btn small" data-d="folder">Change folder</button></div></div>`;
+    if (signed && r){
+      const pt = plTarget();
+      h += `<div class="sgroup"><h3>Playlist folder</h3><p>${pt.path ? esc(pt.path) : 'Music folder (top level)'}</p>
+        <p class="muted">${pt.ok ? 'New playlists are saved here. Existing playlists stay where they are.' : 'The chosen folder was not found, so the music folder is being used.'}</p>
+        <div class="dbtns"><button class="btn small" data-d="plfolder">Choose folder…</button><button class="btn small" data-d="plroot" ${pt.path ? '' : 'disabled'}>Use music folder</button></div></div>`;
+    }
+    h += `<div class="sgroup"><h3>Appearance</h3><div class="dbtns"><button class="btn small ${dark ? '' : 'primary'}" data-d="light">Light</button><button class="btn small ${dark ? 'primary' : ''}" data-d="dark">Dark</button></div></div>`;
   }
-  h += `<div class="sgroup"><h3>Appearance</h3><div class="dbtns"><button class="btn small ${dark ? '' : 'primary'}" data-d="light">Light</button><button class="btn small ${dark ? 'primary' : ''}" data-d="dark">Dark</button></div></div>
-    <div class="status" id="setMsg"></div><div class="dbtns"><button class="btn" data-d="close">Close</button></div>`;
+  h += '<div class="status" id="setMsg"></div><div class="dbtns"><button class="btn" data-d="close">Close</button></div>';
   openDlg(h, {
+    tab: el => openSettings(el.dataset.t),
     signout: () => { dlg.close(); signOut(); },
     signin: () => signIn(),
     folder: () => { dlg.close(); openPicker(); },
     quick: () => quickUpdate(),
     full: () => { const rt = store.get('root'); if (rt) openLibrary(rt.id, rt.name, true); },
     retry: () => retryFailedTags(),
+    plfolder: () => openPlFolderDialog(),
+    plroot: () => { store.set('plFolder', null); openSettings('account'); },
+    reveal: el => { const t = lib.tracks.get(el.dataset.id); if (t){ dlg.close(); revealFolder(t.folder); } },
+    od: async el => {
+      const t = lib.tracks.get(el.dataset.id); if (!t) return;
+      const w = window.open('', '_blank');           // opened first so the browser doesn't treat it as a pop-up
+      try {
+        const d = await gfetch(`${itemPath(t.pid)}?$select=webUrl`);
+        if (w && d.webUrl) w.location.href = d.webUrl; else if (w) w.close();
+      } catch(e){ if (w) w.close(); const m = $('setMsg'); if (m) m.textContent = 'Could not open OneDrive: ' + e.message; }
+    },
     light: () => { setTheme('light'); openSettings(); },
     dark: () => { setTheme('dark'); openSettings(); }
   });
@@ -1568,7 +1706,7 @@ function openSettings(){
 /* ---------- Boot ---------- */
 $('signIn').addEventListener('click', signIn);
 $('settingsBtn').addEventListener('click', openSettings);
-syncToggles();
+syncToggles(); setPane('left'); renderRight();
 setTheme(store.get('theme') || CONFIG.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 initAuth();
 </script>
