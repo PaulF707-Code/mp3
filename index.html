@@ -350,7 +350,7 @@ async function gfetch(pathOrUrl, tries = 4){
     try { res = await tfetch(url, { headers: { Authorization: 'Bearer ' + await getToken() } }, 30000); }
     catch(e){ if (e.message === 'session expired' || i === tries - 1) throw e; await sleep(600 * 2 ** i); continue; }
     if (res.status === 429 || res.status === 503){
-      onThrottle(); await sleep((parseInt(res.headers.get('Retry-After')) || 2 ** i) * 1000); continue;
+      diagCount('graph429'); onThrottle(); await sleep((parseInt(res.headers.get('Retry-After')) || 2 ** i) * 1000); continue;
     }
     if (!res.ok) throw new Error(`Graph ${res.status}`);
     return res.json();
@@ -1068,22 +1068,26 @@ function rewriteID3(bytes, ch){
 /* ===ID3 END */
 
 let throttleUntil = 0;
-async function readRange(t, start, end){
+async function readRange(t, start, end, kind){
+  const t0 = performance.now();
   let lastErr = null;
   for (let attempt = 0; attempt < 4; attempt++){
-    const wait = Math.min(throttleUntil - Date.now(), 15000); if (wait > 0) await sleep(wait);
+    const wait = Math.min(throttleUntil - Date.now(), 15000); if (wait > 0){ diagCount('waitMs', wait); await sleep(wait); }
+    if (stale(t)) diagCount('fallback');                                   // the prefetch missed this file: one extra Graph lookup
     let res;
     try { res = await tfetch(await freshUrl(t), { headers: { Range: `bytes=${start}-${end}` } }, 20000); }
     catch(e){
       if (/^Graph|session expired/.test(e.message)) throw e;
+      diagCount(e.message === 'timed out' ? 'timeouts' : 'netErr');
       lastErr = new Error(e.message === 'timed out' ? 'timed out waiting for OneDrive' : 'network error or access blocked by the browser'); await sleep(300 * 2 ** attempt); continue;
     }
     if (res.status === 416) return new Uint8Array(0);                     // empty file
     if (res.status === 429 || res.status === 503){
+      diagCount('read429');
       throttleUntil = Date.now() + (parseInt(res.headers.get('Retry-After')) || 2 ** attempt) * 1000; onThrottle();
       lastErr = new Error('throttled by OneDrive (HTTP ' + res.status + ')'); continue;
     }
-    if (res.status === 401 || res.status === 403){ t.url = ''; lastErr = new Error('download link rejected (HTTP ' + res.status + ')'); continue; }
+    if (res.status === 401 || res.status === 403){ diagCount('auth'); t.url = ''; lastErr = new Error('download link rejected (HTTP ' + res.status + ')'); continue; }
     if (!res.ok){
       lastErr = new Error('HTTP ' + res.status);
       if (res.status >= 500){ await sleep(300 * 2 ** attempt); continue; }
@@ -1092,22 +1096,23 @@ async function readRange(t, start, end){
     const reader = res.body.getReader(), chunks = []; let total = 0;
     try {
       while (total <= end - start){ const r = await withTimeout(reader.read(), 15000); if (r.done) break; chunks.push(r.value); total += r.value.length; }
-    } catch(e){ reader.cancel().catch(() => {}); lastErr = new Error('timed out reading the file'); continue; }
+    } catch(e){ diagCount('timeouts'); reader.cancel().catch(() => {}); lastErr = new Error('timed out reading the file'); continue; }
     reader.cancel().catch(() => {});
     noteReadOk();
+    if (kind) diagAdd(kind, performance.now() - t0);
     return concat(...chunks).subarray(0, end - start + 1);
   }
   throw lastErr || new Error('failed');
 }
 // Reads only the start of the file (the ID3 tag). Never downloads the audio.
 async function readTags(t){
-  let buf = await readRange(t, 0, 32767);               // one round trip is the cost, so read enough to usually catch the whole tag
+  let buf = await readRange(t, 0, 32767, 'first');               // one round trip is the cost, so read enough to usually catch the whole tag
   let tag = readID3(buf);
   if (!tag){ t.tags = {}; return; }
   let res = tagsFromFrames(tag);
   if (tag.truncated && !(res.t && res.a && res.al)){        // e.g. big cover art stored before the text frames
     const end = Math.min(tag.total, 1 << 18) - 1;       // second read capped at 256 KB (was 1 MB)
-    if (end >= buf.length){ buf = await readRange(t, 0, end); tag = readID3(buf); if (tag) res = tagsFromFrames(tag); }
+    if (end >= buf.length){ buf = await readRange(t, 0, end, 'second'); tag = readID3(buf); if (tag) res = tagsFromFrames(tag); }
   }
   t.tags = res;
 }
@@ -1132,12 +1137,43 @@ let tagQueue = [], tagWorkersRunning = false;
 const TAG_START = 8, TAG_MIN = 2, TAG_MAX = 12, PAUSE_AFTER = 8, PREFETCH_AHEAD = 80;
 let tagTarget = TAG_START, okStreak = 0, lastThrottleAt = 0;
 let tagGen = 0, activeWorkers = 0, tagPaused = '', tagFails = 0, tagRenderDirty = false, tagSaveDirty = false, urlFill = null, tsTimer = null, resumeTimer = null, pauseRuns = 0;
-function onThrottle(){ if (Date.now() - lastThrottleAt < 5000) return; lastThrottleAt = Date.now(); okStreak = 0; tagTarget = Math.max(TAG_MIN, tagTarget >> 1); }
+// Diagnostics: timings and counters for the tag reader, shown in Settings → Library → Diagnostics.
+const dT = {}, dC = {}; let dDone = [], dStart = 0;
+function diagAdd(k, ms){ const d = dT[k] || (dT[k] = { n: 0, ms: 0, max: 0 }); d.n++; d.ms += ms; if (ms > d.max) d.max = ms; }
+function diagCount(k, v){ dC[k] = (dC[k] || 0) + (v === undefined ? 1 : v); }
+function diagReset(){ Object.keys(dT).forEach(k => delete dT[k]); Object.keys(dC).forEach(k => delete dC[k]); dDone = []; dStart = 0; }
+function diagText(){
+  const f = k => { const d = dT[k]; return d ? `${d.n} × avg ${Math.round(d.ms / d.n)} ms, max ${Math.round(d.max)} ms` : 'none yet'; };
+  const done = dC.done || 0, last = dDone[dDone.length - 1] || 0, elapsed = last && dStart ? (last - dStart) / 1000 : 0;
+  const overall = done && elapsed > 0 ? (done / elapsed).toFixed(2) : '–';
+  let recent = '–';
+  if (dDone.length >= 5){ const span = (last - dDone[0]) / 1000; if (span > 0) recent = ((dDone.length - 1) / span).toFixed(2); }
+  let hint = '';
+  if (done >= 10 && elapsed > 0){
+    if ((dC.waitMs || 0) / 1000 / Math.max(1, tagTarget) > elapsed * 0.4) hint = 'Throttling is the main slowdown: workers spend much of their time waiting.';
+    else if ((dC.fallback || 0) > done * 0.3) hint = 'The download-link prefetch is missing many files, so each pays an extra lookup.';
+    else if (dT.first && dT.second && dT.second.n > dT.first.n * 0.3) hint = 'Many files need a second read (large cover art stored before the text tags).';
+    else if (dT.first && dT.first.ms / dT.first.n > 1500) hint = 'Each read itself is slow (network latency to OneDrive).';
+    else hint = 'No single bottleneck stands out.';
+  }
+  return [
+    `Speed: ${recent} files/s recent, ${overall} files/s overall (${n0(done)} read this session)`,
+    `Workers: ${activeWorkers} active, target ${tagTarget} (lowest ${dC.lowTarget === undefined ? tagTarget : dC.lowTarget}, max ${TAG_MAX})`,
+    `Queue: ${n0(tagQueue.length)} waiting` + (tagPaused ? `, PAUSED: ${tagPaused}` : ''),
+    `URL prefetch: ${f('prefetch')}; links obtained for ${n0(dC.pfGot || 0)} of ${n0(dC.pfWant || 0)} files`,
+    `Single URL lookups (prefetch missed): ${n0(dC.fallback || 0)}`,
+    `First read (32 KB): ${f('first')}`,
+    `Second read (up to 256 KB): ${f('second')}`,
+    `Throttled: reads ${dC.read429 || 0}, Graph ${dC.graph429 || 0}; time workers spent waiting: ${((dC.waitMs || 0) / 1000).toFixed(1)} s`,
+    `Timeouts ${dC.timeouts || 0}, network errors ${dC.netErr || 0}, link rejected ${dC.auth || 0}`
+  ].concat(hint ? ['Hint: ' + hint] : []).join('\n');
+}
+function onThrottle(){ if (Date.now() - lastThrottleAt < 5000) return; lastThrottleAt = Date.now(); okStreak = 0; tagTarget = Math.max(TAG_MIN, tagTarget >> 1); dC.lowTarget = Math.min(dC.lowTarget === undefined ? tagTarget : dC.lowTarget, tagTarget); }
 function noteReadOk(){ if (++okStreak >= 40 && tagTarget < TAG_MAX){ okStreak = 0; tagTarget++; processTagQueue(); } }
 const pendingTracks = () => [...lib.tracks.values()].filter(t => t.tagState === 'pending');
 function resetTagQueue(){   // a new library replaces the old one: drop all queued work
   tagGen++; tagQueue = []; activeWorkers = 0; tagWorkersRunning = false; tagPaused = ''; tagFails = 0; tagRenderDirty = tagSaveDirty = false;
-  clearTimeout(resumeTimer); resumeTimer = null; pauseRuns = 0;
+  clearTimeout(resumeTimer); resumeTimer = null; pauseRuns = 0; diagReset();
 }
 function enqueueTagScan(tracks){
   tracks.forEach(t => { if (t.tagState === 'pending' && !t.queued){ t.queued = true; tagQueue.push(t); } });
@@ -1146,12 +1182,15 @@ function enqueueTagScan(tracks){
 function processTagQueue(){
   if (tagPaused) return;
   const gen = tagGen;
-  while (activeWorkers < Math.min(tagTarget, tagQueue.length)){ activeWorkers++; tagWorkersRunning = true; tagWorker(gen); }
+  while (activeWorkers < Math.min(tagTarget, tagQueue.length)){ if (!dStart) dStart = Date.now(); activeWorkers++; tagWorkersRunning = true; tagWorker(gen); }
 }
 // Download links for the next files are fetched 20 at a time (one Graph call per 20 files, not per file).
 async function ensureUrl(t){
   for (let i = 0; i < 3 && stale(t); i++){
-    if (!urlFill) urlFill = prefetchUrls([t, ...tagQueue.slice(0, PREFETCH_AHEAD - 1)].filter(stale)).finally(() => { urlFill = null; });
+    if (!urlFill){
+      const batch = [t, ...tagQueue.slice(0, PREFETCH_AHEAD - 1)].filter(stale), t0 = performance.now();
+      urlFill = prefetchUrls(batch).then(() => { diagAdd('prefetch', performance.now() - t0); diagCount('pfWant', batch.length); diagCount('pfGot', batch.filter(x => !stale(x)).length); }).finally(() => { urlFill = null; });
+    }
     await urlFill;
   }
 }
@@ -1170,6 +1209,7 @@ async function tagWorker(gen){
       if (lib.nodes.get(t.id) !== t || t.tagState !== 'pending') continue;   // deleted, or already handled elsewhere
       try {
         await readTrackTags(t); tagFails = 0; pauseRuns = 0; tagSaveDirty = tagRenderDirty = true; requestSnapshot();
+        diagCount('done'); dDone.push(Date.now()); if (dDone.length > 60) dDone.shift();
       } catch(e){
         tagSaveDirty = tagRenderDirty = true;
         if (++tagFails >= PAUSE_AFTER && !tagPaused){ tagPaused = e.message; scheduleAutoResume(); }   // nothing is working: stop hammering OneDrive
@@ -1241,8 +1281,9 @@ function tagCounts(){
 }
 function updateTagStatus(now){
   if (!now){ if (!tsTimer) tsTimer = setTimeout(() => { tsTimer = null; updateTagStatus(true); }, 300); return; }
-  const a = document.getElementById('tagStatus'), b = document.getElementById('setTag'), rb = document.getElementById('retryBtn'), el = document.getElementById('errList'), eh = document.getElementById('errHead');
-  if (!a && !b && !rb && !el) return;
+  const a = document.getElementById('tagStatus'), b = document.getElementById('setTag'), rb = document.getElementById('retryBtn'), el = document.getElementById('errList'), eh = document.getElementById('errHead'), dg = document.getElementById('setDiag');
+  if (!a && !b && !rb && !el && !dg) return;
+  if (dg) dg.textContent = diagText();
   const c = tagCounts();
   if (a){
     a.textContent = (c.pending || c.error || tagPaused)
@@ -1867,7 +1908,8 @@ function openSettings(tab){
       <div class="dbtns"><button class="btn small primary" data-d="quick" ${lib.delta ? '' : 'disabled'}>Update changes</button><button class="btn small" data-d="full">Full rescan</button></div></div>
       <div class="sgroup"><h3>Tag scan</h3><p class="muted" id="setTag" style="white-space:pre-line"></p>
       <div class="dbtns"><button class="btn small hidden" id="retryBtn" data-d="retry">Retry failed tags</button></div></div>
-      <div class="sgroup"><h3 id="errHead">Files with tag errors</h3><div class="dlist" id="errList" style="display:block"></div></div>`;
+      <div class="sgroup"><h3 id="errHead">Files with tag errors</h3><div class="dlist" id="errList" style="display:block"></div></div>
+      <div class="sgroup"><h3>Diagnostics</h3><div class="diag" id="setDiag"></div><div class="dbtns"><button class="btn small" data-d="diagcopy">Copy</button><button class="btn small" data-d="diagreset">Reset counters</button></div></div>`;
   } else {
     h += '<div class="sgroup"><h3>Account</h3>' + (signed
       ? `<p>Signed in${userName ? ' as <b>' + esc(userName) + '</b>' : ''}</p><div class="dbtns"><button class="btn small" data-d="signout">Sign out</button></div>`
@@ -1890,6 +1932,8 @@ function openSettings(tab){
     quick: () => quickUpdate(),
     full: () => { const rt = store.get('root'); if (rt) openLibrary(rt.id, rt.name, true); },
     retry: () => retryFailedTags(),
+    diagcopy: () => { const m = $('setMsg'); (navigator.clipboard ? navigator.clipboard.writeText(diagText()) : Promise.reject()).then(() => { if (m) m.textContent = 'Diagnostics copied.'; }, () => { if (m) m.textContent = 'Could not copy; select the text and copy it.'; }); },
+    diagreset: () => { diagReset(); updateTagStatus(true); },
     plfolder: () => openPlFolderDialog(),
     plroot: () => { store.set('plFolder', null); openSettings('account'); },
     reveal: el => { const t = lib.tracks.get(el.dataset.id); if (t){ dlg.close(); revealFolder(t.folder); } },
