@@ -364,7 +364,16 @@ async function gfetch(pathOrUrl, tries = 4){
 async function gsend(path, method, body, contentType){
   const headers = { Authorization: 'Bearer ' + await getToken() };
   if (body !== undefined) headers['Content-Type'] = contentType || 'application/json';
-  const res = await tfetch(GRAPH + path, { method, headers, body: body === undefined ? undefined : (contentType ? body : JSON.stringify(body)) }, 60000);
+  let res;
+  for (let i = 0; ; i++){
+    const gw = Math.min(graphUntil - Date.now(), 15000); if (gw > 0) await sleep(gw);
+    headers.Authorization = 'Bearer ' + await getToken();
+    res = await tfetch(GRAPH + path, { method, headers, body: body === undefined ? undefined : (contentType ? body : JSON.stringify(body)) }, 60000);
+    if ((res.status === 429 || res.status === 503) && i < 3){
+      const ra = (parseInt(res.headers.get('Retry-After')) || 2 ** (i + 1)) * 1000; graphUntil = Math.max(graphUntil, Date.now() + ra); diagCount('graph429'); await sleep(ra); continue;
+    }
+    break;
+  }
   if (!res.ok) throw new Error(res.status === 401 || res.status === 403 ? 'no write permission (sign out and sign in again)' : 'OneDrive ' + res.status);
   return res.status === 204 ? null : res.json().catch(() => null);
 }
@@ -935,7 +944,11 @@ const saveSnapshotQuiet = () => {
     saveQueued = false;
     const r = store.get('root'); if (!r) return false;
     try { await saveIndex(r.id); lastSaveAt = Date.now(); return true; }
-    catch(e){ setStatus('Could not back up the index to OneDrive: ' + e.message); return false; }
+    catch(e){
+      setStatus('OneDrive backup delayed (' + e.message + '). Your library is saved on this device; retrying in a few minutes.');
+      snapDirty = true; clearTimeout(snapTimer); snapTimer = setTimeout(() => { snapTimer = null; runSnapshotNow(); }, 3 * 60 * 1000);
+      return false;
+    }
   });
   return saveChain;
 };
@@ -946,7 +959,7 @@ function requestSnapshot(force){
   if (!lib.rootId) return Promise.resolve(false);
   snapDirty = true;
   if (force){ clearTimeout(snapTimer); snapTimer = null; return runSnapshotNow(); }
-  if (!snapTimer) snapTimer = setTimeout(() => { snapTimer = null; runSnapshotNow(); }, Math.max(15000, SNAP_MIN_MS - (Date.now() - lastSaveAt)));
+  if (!snapTimer) snapTimer = setTimeout(() => { snapTimer = null; runSnapshotNow(); }, Math.max(15000, (activeWorkers ? 2 * SNAP_MIN_MS : SNAP_MIN_MS) - (Date.now() - lastSaveAt)));
   return Promise.resolve(false);
 }
 function runSnapshotNow(){ snapDirty = false; return saveSnapshotQuiet(); }
