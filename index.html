@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>PMMP3</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563EB'/%3E%3Cg fill='%23fff'%3E%3Cellipse cx='21' cy='45' rx='7' ry='5.2' transform='rotate(-20 21 45)'/%3E%3Cellipse cx='41' cy='41' rx='7' ry='5.2' transform='rotate(-20 41 41)'/%3E%3Crect x='25.5' y='18' width='3.2' height='28'/%3E%3Crect x='45' y='14' width='3.2' height='28'/%3E%3Cpolygon points='25.5,17 48.2,12 48.2,19 25.5,24'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#EEF2F6" id="themeColor">
 <style>
 
 :root {
@@ -267,6 +272,7 @@ const THEMES = ['light', 'dark'];
 function setTheme(t){
   if (!THEMES.includes(t)) t = 'light';
   document.documentElement.dataset.theme = t; store.set('theme', t);
+  const m = document.getElementById('themeColor'); if (m) m.content = t === 'dark' ? '#0c0c0d' : '#EEF2F6';
 }
 
 /* ---------- Auth (OAuth 2.0 authorization code + PKCE, no library needed) ---------- */
@@ -1425,6 +1431,7 @@ function renderLibrary(){
   $('libraryBody').innerHTML = html;
   $('libraryBody').querySelectorAll('details[open]').forEach(fillTracks);
   markPlaying(); observeLazy(); updateTagStatus(true);
+  if (rightTab === 'playlists') renderRight();      // the playlist list depends on the library, so refresh it too (it was empty on first load)
 }
 function fillTracks(d){
   if (d.dataset.filled) return;
@@ -1978,6 +1985,7 @@ $('signIn').addEventListener('click', signIn);
 $('settingsBtn').addEventListener('click', openSettings);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushDb(); });
 addEventListener('pagehide', () => { flushDb(); });
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 syncToggles(); setPane('left'); renderRight();
 setTheme(store.get('theme') || CONFIG.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 initAuth();
