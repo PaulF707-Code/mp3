@@ -85,6 +85,10 @@ dialog{color:var(--text);background:var(--surface-solid);border:1px solid var(--
 dialog::backdrop{background:#000a}
 dialog h2{margin:0 0 6px;font-size:1.25rem}
 .muted{color:var(--muted);font-size:.9rem}
+.sgroup{border-top:1px solid var(--line);padding:10px 0 6px}
+.sgroup h3{margin:0 0 6px;font-size:1rem;color:var(--text)}
+.sgroup p{margin:4px 0}
+header .ico{font-size:1.35rem;width:44px;height:44px}
 .dlist{max-height:34vh;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px;margin:8px 0}
 .dlist:empty{display:none}
 .dlist .btn{display:block;width:100%;text-align:left;margin:4px 0;border-radius:8px}
@@ -110,8 +114,8 @@ dialog h2{margin:0 0 6px;font-size:1.25rem}
 <body>
 <header>
   <h1>MP3 Player</h1>
-  <div><button class="btn small" id="themeBtn" title="Switch between dark and light">Dark mode</button> <span class="who" id="who"></span><button class="btn small hidden" id="signOut">Sign out</button></div>
-  </header>
+  <button class="ico" id="settingsBtn" title="Settings" aria-label="Settings">⚙</button>
+</header>
 
 <main>
   <!-- Signed out -->
@@ -150,11 +154,8 @@ dialog h2{margin:0 0 6px;font-size:1.25rem}
         </select></label>
     </div>
     <div class="bar">
-      <button class="btn small" id="readTags">Read tags</button>
       <button class="btn small" id="newPl">New playlist</button>
       <button class="btn small primary hidden" id="dlBtn">Download (0)</button>
-      <button class="btn small" id="rescan">Rescan</button>
-      <button class="btn small" id="changeFolder">Change folder</button>
     </div>
     <div class="status" id="libStatus"></div>
     <div id="libraryBody"></div>
@@ -204,6 +205,8 @@ const safe = s => String(s).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/[. ]
 const tg = t => t.tags || {};
 const tTitle = t => tg(t).t || t.title;
 const tArtist = t => tg(t).a || '';
+const setStatus = msg => { const a = document.getElementById('libStatus'), b = document.getElementById('setMsg'); if (a) a.textContent = msg; if (b) b.textContent = msg; };
+const TAG_KEYS = ['t','a','aa','al','g','y','n','d'];
 const fmt = s => isFinite(s) ? Math.floor(s/60) + ':' + String(Math.floor(s%60)).padStart(2,'0') : '0:00';
 
 /* ---------- Colour themes ---------- */
@@ -211,7 +214,6 @@ const THEMES = ['light', 'dark'];
 function setTheme(t){
   if (!THEMES.includes(t)) t = 'light';
   document.documentElement.dataset.theme = t; store.set('theme', t);
-  const b = $('themeBtn'); if (b) b.textContent = t === 'dark' ? 'Light mode' : 'Dark mode';
 }
 
 /* ---------- Auth (OAuth 2.0 authorization code + PKCE, no library needed) ---------- */
@@ -266,8 +268,8 @@ async function signIn(){
   } catch(e){ $('cfgWarn').textContent = 'Sign-in failed: ' + e.message; }
 }
 function signOut(){
-  stopPlayback(); tok = null; store.set('tok', null); store.set('root', null);
-  $('who').textContent = ''; $('signOut').classList.add('hidden'); $('player').classList.add('hidden'); show('vSignedOut');
+  stopPlayback(); tok = null; store.set('tok', null); store.set('root', null); userName = '';
+  lib = emptyLib(); $('player').classList.add('hidden'); show('vSignedOut');
 }
 async function getToken(){
   if (tok && tok.exp > Date.now() + 60000) return tok.access;
@@ -277,9 +279,9 @@ async function getToken(){
   signOut(); $('cfgWarn').textContent = 'Your session expired. Please sign in again.';
   throw new Error('session expired');
 }
+let userName = '';
 function onSignedIn(){
-  $('signOut').classList.remove('hidden');
-  gfetch('/me').then(d => { $('who').textContent = d.userPrincipalName || d.displayName || ''; }).catch(() => {});
+  gfetch('/me').then(d => { userName = d.userPrincipalName || d.displayName || ''; }).catch(() => {});
   const saved = store.get('root');
   if (saved) openLibrary(saved.id, saved.name, false); else openPicker();
 }
@@ -307,7 +309,7 @@ async function gsend(path, method, body, contentType){
   return res.status === 204 ? null : res.json().catch(() => null);
 }
 async function listChildren(id, cb){
-  let url = `${itemPath(id)}/children?$top=200`;
+  let url = `${itemPath(id)}/children?$top=200&$select=id,name,size,folder,file`;
   while (url){
     const d = await gfetch(url);
     d.value.forEach(cb);
@@ -321,6 +323,23 @@ async function refreshUrl(item){
 }
 const stale = item => !item.url || Date.now() - (item.urlAt || 0) > 25 * 60 * 1000;
 async function freshUrl(item){ if (stale(item)) await refreshUrl(item); return item.url; }
+// Fetch download links for many files at once (20 per Graph $batch call)
+async function prefetchUrls(list){
+  const need = list.filter(stale), groups = [];
+  for (let i = 0; i < need.length; i += 20) groups.push(need.slice(i, i + 20));
+  await Promise.all(groups.map(async g => {
+    try {
+      const r = await fetch(GRAPH + '/$batch', { method: 'POST',
+        headers: { Authorization: 'Bearer ' + await getToken(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests: g.map((t, i) => ({ id: String(i), method: 'GET', url: `${itemPath(t.id)}?$select=id,@microsoft.graph.downloadUrl` })) }) });
+      if (!r.ok) return;
+      (await r.json()).responses.forEach(x => {
+        const u = x.status === 200 && x.body && x.body['@microsoft.graph.downloadUrl'];
+        if (u){ const t = g[+x.id]; t.url = u; t.urlAt = Date.now(); }
+      });
+    } catch(e){}
+  }));
+}
 async function fetchFile(t){
   let res;
   try { res = await fetch(await freshUrl(t)); }
@@ -336,19 +355,23 @@ async function fetchText(item){
     return r.text();
   }
 }
-// Replace the content of an existing OneDrive file (upload session, works for any size)
-async function uploadReplace(item, blob){
-  const sess = await gsend(`${itemPath(item.id)}/createUploadSession`, 'POST', { item: { '@microsoft.graph.conflictBehavior': 'replace' } });
-  if (!sess || !sess.uploadUrl) throw new Error('could not start upload');
+// Upload a blob to an upload-session URL in chunks
+async function putChunks(uploadUrl, blob){
   const size = blob.size, CH = 327680 * 10; let pos = 0;
   while (pos < size){
     const end = Math.min(pos + CH, size);
     let res;
-    try { res = await fetch(sess.uploadUrl, { method: 'PUT', headers: { 'Content-Range': `bytes ${pos}-${end - 1}/${size}` }, body: blob.slice(pos, end) }); }
+    try { res = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Range': `bytes ${pos}-${end - 1}/${size}` }, body: blob.slice(pos, end) }); }
     catch(e){ throw new Error('upload blocked by the browser'); }
     if (![200, 201, 202].includes(res.status)) throw new Error('upload failed (' + res.status + ')');
     pos = end;
   }
+}
+// Replace the content of an existing OneDrive file (works for any size)
+async function uploadReplace(item, blob){
+  const sess = await gsend(`${itemPath(item.id)}/createUploadSession`, 'POST', { item: { '@microsoft.graph.conflictBehavior': 'replace' } });
+  if (!sess || !sess.uploadUrl) throw new Error('could not start upload');
+  await putChunks(sess.uploadUrl, blob);
 }
 
 /* ---------- Views ---------- */
@@ -395,14 +418,55 @@ dlg.addEventListener('click', e => {
   if (dlgH[a]) dlgH[a](el, e);
 });
 dlg.addEventListener('input', e => { if (dlgH.input) dlgH.input(e); });
+dlg.addEventListener('change', e => { if (dlgH.change) dlgH.change(e); });
 dlg.addEventListener('close', () => { if (dlgH.onclose) dlgH.onclose(); });
-const flash = (msg) => { $('libStatus').textContent = msg; };
+const flash = setStatus;
 
 /* ---------- Library state ---------- */
-let lib = { folders: new Map(), playlists: [], tracks: new Map(), at: 0 };
+// The library is a graph of nodes keyed by OneDrive item id. Folders: {id,pid,name,d:1}.
+// Files: {id,pid,name,k:'t'|'p'|'i',sz,...}. Paths, folders and track lists are derived by rebuild().
+const emptyLib = () => ({ nodes: new Map(), folders: new Map(), playlists: [], tracks: new Map(), byPath: new Map(), byName: new Map(), at: 0, rid: '', rootName: '', delta: '' });
+let lib = emptyLib();
 const sel = new Map();   // selected groups / playlists for download
 let curGroups = [];
 
+const kindOf = name => AUDIO_RE.test(name) ? 't' : LIST_RE.test(name) ? 'p' : IMG_RE.test(name) ? 'i' : null;
+function makeFile(it, pid, seed){
+  const k = kindOf(it.name); if (!k) return null;
+  const n = { id: it.id, pid, name: it.name, k, sz: it.size || 0, url: '', urlAt: 0 };
+  if (k === 't'){
+    n.title = it.name.replace(/\.[^.]+$/, '').replace(/_/g, ' ');
+    if (seed && seed.tags && (!seed.sz || !it.size || seed.sz === it.size)) n.tags = seed.tags;   // keep tags unless the file changed
+  }
+  if (k === 'p') n.title = it.name.replace(/\.[^.]+$/, '');
+  return n;
+}
+function rebuild(){
+  const nodes = lib.nodes, memo = new Map();
+  const pathOf = id => {
+    if (id === lib.rid) return '';
+    if (memo.has(id)) return memo.get(id);
+    memo.set(id, null);
+    const n = nodes.get(id); if (!n || n.pid == null) return null;
+    const pp = pathOf(n.pid); if (pp === null) return null;
+    const p = pp ? pp + '/' + n.name : n.name; memo.set(id, p); return p;
+  };
+  lib.folders = new Map(); lib.tracks = new Map(); lib.playlists = [];
+  lib.folders.set('', { path: '', name: lib.rootName, tracks: [], images: [] });
+  nodes.forEach(n => { if (!n.d) return; const p = pathOf(n.id); if (p) lib.folders.set(p, { path: p, name: n.name, tracks: [], images: [] }); });
+  nodes.forEach(n => {
+    if (n.d) return;
+    const fp = pathOf(n.pid); if (fp === null) return;
+    n.folder = fp; n.path = fp ? fp + '/' + n.name : n.name;
+    const f = lib.folders.get(fp); if (!f) return;
+    if (n.k === 't'){ f.tracks.push(n); lib.tracks.set(n.id, n); }
+    else if (n.k === 'p'){ delete n.tracks; lib.playlists.push(n); }
+    else f.images.push(n);
+  });
+  lib.folders.forEach(f => { f.tracks.sort((a, b) => cmpS(a.name, b.name)); f.images.sort((a, b) => cmpS(a.name, b.name)); });
+  lib.playlists.sort((a, b) => cmpS(a.name, b.name));
+  indexLib();
+}
 function indexLib(){
   lib.byPath = new Map(); lib.byName = new Map();
   lib.tracks.forEach(t => {
@@ -411,49 +475,131 @@ function indexLib(){
   });
 }
 
-/* ---------- Library scan ---------- */
-async function scan(rootId, rootName){
+/* ---------- Full scan ---------- */
+async function deltaBaseline(rid){
+  // Ask OneDrive for a "from now" change token so later updates only fetch what changed.
+  for (const base of [`/me/drive/items/${encodeURIComponent(rid)}/delta`, '/me/drive/root/delta']){
+    try {
+      let d = await gfetch(base + '?token=latest'), guard = 0;
+      while (!d['@odata.deltaLink'] && d['@odata.nextLink'] && guard++ < 50) d = await gfetch(d['@odata.nextLink']);
+      if (d['@odata.deltaLink']) return d['@odata.deltaLink'];
+    } catch(e){}
+  }
+  return '';
+}
+async function scan(rootId, rootName, seed){
   show('vLibrary'); $('libraryBody').innerHTML = '';
-  const oldTags = new Map(); lib.tracks.forEach(t => { if (t.tags) oldTags.set(t.id, t.tags); });
-  lib = { folders: new Map(), playlists: [], tracks: new Map(), at: 0 };
-  const queue = [{ id: rootId, path: '' }]; let rootFailed = false;
-  let active = 0, foldersDone = 0;
-  const setMsg = () => { $('libStatus').textContent = `Scanning ${rootName}… ${foldersDone} folders, ${lib.tracks.size} tracks`; };
+  const oldTags = seed || new Map();
+  if (!seed) lib.tracks.forEach(t => { if (t.tags) oldTags.set(t.id, { tags: t.tags, sz: t.sz }); });
+  setStatus('Preparing scan…');
+  let rid;
+  try { rid = (await gfetch(`${itemPath(rootId)}?$select=id`)).id; }
+  catch(e){ setStatus('Could not open the folder: ' + e.message); return; }
+  const delta = await deltaBaseline(rid);
+  const nodes = new Map([[rid, { id: rid, pid: null, name: rootName, d: 1 }]]);
+  const queue = [rid]; let rootFailed = false, active = 0, foldersDone = 0, files = 0;
+  const setMsg = () => setStatus(`Scanning ${rootName}… ${foldersDone} folders, ${files} tracks`);
   setMsg();
   const worker = async () => {
     while (true){
-      const f = queue.shift();
-      if (!f){ if (!active) return; await sleep(40); continue; }
+      const fid = queue.shift();
+      if (fid === undefined){ if (!active) return; await sleep(40); continue; }
       active++;
       try {
-        const rec = { path: f.path, name: f.path ? f.path.split('/').pop() : rootName, tracks: [], images: [] };
-        lib.folders.set(f.path, rec);
-        await listChildren(f.id, it => {
-          if (it.folder){ queue.push({ id: it.id, path: f.path ? f.path + '/' + it.name : it.name }); return; }
+        await listChildren(fid, it => {
+          if (it.folder){ nodes.set(it.id, { id: it.id, pid: fid, name: it.name, d: 1 }); queue.push(it.id); return; }
           if (!it.file) return;
-          const base = { id: it.id, name: it.name, folder: f.path, path: f.path ? f.path + '/' + it.name : it.name, url: it['@microsoft.graph.downloadUrl'], urlAt: Date.now() };
-          if (AUDIO_RE.test(it.name)){
-            const t = { ...base, title: it.name.replace(/\.[^.]+$/, '').replace(/_/g, ' '), tags: oldTags.get(it.id) };
-            rec.tracks.push(t); lib.tracks.set(t.id, t);
-          } else if (LIST_RE.test(it.name)){
-            lib.playlists.push({ ...base, title: it.name.replace(/\.[^.]+$/, '') });
-          } else if (IMG_RE.test(it.name)){
-            rec.images.push(base);
-          }
+          const n = makeFile(it, fid, oldTags.get(it.id));
+          if (n){ nodes.set(n.id, n); if (n.k === 't') files++; }
         });
-      } catch(e){ if (!f.path) rootFailed = true; else $('libStatus').textContent = 'Some folders could not be read: ' + e.message; }
+      } catch(e){ if (fid === rid) rootFailed = true; else setStatus('Some folders could not be read: ' + e.message); }
       finally { active--; foldersDone++; setMsg(); }
     }
   };
-  await Promise.all([worker(), worker(), worker(), worker()]);
-  if (rootFailed && !lib.tracks.size && !lib.playlists.length){ openPicker(); return; }
-  lib.folders.forEach(f => { f.tracks.sort((a,b) => cmpS(a.name, b.name)); f.images.sort((a,b) => cmpS(a.name, b.name)); });
-  lib.playlists.sort((a,b) => cmpS(a.name, b.name));
-  indexLib(); lib.at = Date.now(); sel.clear(); updateDlBtn();
-  $('libStatus').textContent = libSummary() + ' · saving index…';
-  renderLibrary();
-  try { await saveIndex(rootId); $('libStatus').textContent = libSummary() + ' · index saved to OneDrive'; }
-  catch(e){ $('libStatus').textContent = libSummary() + ' · could not save index (' + e.message + ')'; }
+  await Promise.all(Array.from({ length: 10 }, worker));
+  if (rootFailed && nodes.size === 1){ openPicker(); return; }
+  lib = Object.assign(emptyLib(), { nodes, at: Date.now(), rid, rootName, delta });
+  rebuild(); sel.clear(); updateDlBtn(); renderLibrary();
+  setStatus(libSummary() + ' · saving index…');
+  try { await saveIndex(rootId); setStatus(libSummary() + ' · index saved to OneDrive' + (delta ? '' : ' (quick update not available)')); }
+  catch(e){ setStatus(libSummary() + ' · could not save index (' + e.message + ')'); }
+}
+
+/* ---------- Quick update (changes only, via OneDrive delta) ---------- */
+function applyChanges(raw){
+  const st = { added: 0, removed: 0, changed: 0, newTracks: [] };
+  const last = new Map(); raw.forEach(it => last.set(it.id, it));
+  const items = [...last.values()];
+  items.forEach(it => { if (it.deleted && lib.nodes.delete(it.id)) st.removed++; });
+  const upsert = (it, pid) => {
+    const ex = lib.nodes.get(it.id);
+    if (it.folder){
+      if (ex && ex.d){ if (ex.name !== it.name || ex.pid !== pid) st.changed++; ex.name = it.name; ex.pid = pid; }
+      else lib.nodes.set(it.id, { id: it.id, pid, name: it.name, d: 1 });
+      return;
+    }
+    if (!it.file) return;
+    const k = kindOf(it.name);
+    if (!k){ if (ex && lib.nodes.delete(it.id)) st.removed++; return; }
+    if (ex && !ex.d && ex.k === k){
+      if (ex.name !== it.name || ex.pid !== pid) st.changed++;
+      ex.name = it.name; ex.pid = pid;
+      if (k === 't' && it.size && ex.sz && it.size !== ex.sz){ ex.tags = undefined; ex.url = ''; ex.sz = it.size; st.changed++; st.newTracks.push(ex); }
+      else if (it.size) ex.sz = it.size;
+      return;
+    }
+    const n = makeFile(it, pid); lib.nodes.set(n.id, n); st.added++;
+    if (n.k === 't') st.newTracks.push(n);
+  };
+  let pending = items.filter(it => !it.deleted && it.id !== lib.rid && it.parentReference && it.parentReference.id);
+  let progress = true;
+  while (pending.length && progress){
+    progress = false; const rest = [];
+    pending.forEach(it => { const pid = it.parentReference.id; if (lib.nodes.has(pid)){ upsert(it, pid); progress = true; } else rest.push(it); });
+    pending = rest;
+  }
+  pending.forEach(it => { if (lib.nodes.delete(it.id)) st.removed++; });   // moved out of our folder
+  // drop anything no longer reachable from the root (e.g. children of deleted folders)
+  const ok = new Map();
+  const reach = id => {
+    if (id === lib.rid) return true;
+    if (ok.has(id)) return ok.get(id);
+    ok.set(id, false);
+    const n = lib.nodes.get(id), r = !!n && n.pid != null && reach(n.pid);
+    ok.set(id, r); return r;
+  };
+  [...lib.nodes.keys()].forEach(id => { if (!reach(id)){ lib.nodes.delete(id); st.removed++; } });
+  return st;
+}
+let busy = false;
+async function quickUpdate(){
+  if (busy) return;
+  if (!lib.delta){ setStatus('Quick update needs one full rescan first.'); return; }
+  busy = true;
+  try {
+    setStatus('Checking OneDrive for changes…');
+    let url = lib.delta, next = '', guard = 0; const items = [];
+    while (url && guard++ < 1000){
+      const d = await gfetch(url);
+      items.push(...d.value); next = d['@odata.deltaLink'] || next; url = d['@odata.nextLink'] || null;
+    }
+    if (!next) throw new Error('no change token returned');
+    const st = applyChanges(items);
+    lib.delta = next;
+    if (st.added || st.removed || st.changed){
+      lib.at = Date.now(); rebuild(); sel.clear(); updateDlBtn(); renderLibrary();
+      if (st.newTracks.length){
+        setStatus(`Reading tags for ${st.newTracks.length} new or changed tracks…`);
+        await readTagsList(st.newTracks, { stop: false }); renderLibrary();
+      }
+      await saveIndexQuiet();
+    }
+    setStatus(`Up to date: ${st.added} added, ${st.removed} removed, ${st.changed} changed · ${libSummary()}`);
+  } catch(e){
+    busy = false;
+    setStatus('Quick update failed (' + e.message + '). Running a full rescan…');
+    const r = store.get('root'); if (r) await openLibrary(r.id, r.name, true);
+  } finally { busy = false; }
 }
 
 /* ---------- Saved library index (stored in the chosen OneDrive folder) ---------- */
@@ -465,15 +611,21 @@ const libSummary = () => {
 async function openLibrary(id, name, force){
   show('vLibrary'); $('libraryBody').innerHTML = '';
   if (!force){
-    $('libStatus').textContent = 'Loading saved library…';
+    setStatus('Loading saved library…');
     const data = await loadIndex(id);
-    if (data){
+    if (data && data.v === 3){
       hydrate(data, name); renderLibrary();
-      $('libStatus').textContent = libSummary() + ' · saved ' + new Date(data.at).toLocaleString();
+      setStatus(libSummary() + ' · saved ' + new Date(data.at).toLocaleString());
+      if (store.get('autoUpdate') && lib.delta) quickUpdate();
       return;
     }
+    if (data){   // older index format: rescan once, keeping the tags already read
+      const seed = new Map();
+      data.f.forEach(([path, tracks]) => tracks.forEach(r => { if (Array.isArray(r[2])){ const tg2 = {}; TAG_KEYS.forEach((k, i) => { if (r[2][i]) tg2[k] = r[2][i]; }); seed.set(r[0], { tags: tg2, sz: 0 }); } }));
+      return scan(id, name, seed);
+    }
   }
-  scan(id, name);
+  return scan(id, name);
 }
 async function loadIndex(rootId){
   try {
@@ -482,39 +634,48 @@ async function loadIndex(rootId){
     try { res = await fetch(meta['@microsoft.graph.downloadUrl']); if (!res.ok) throw 0; }
     catch(_){ res = await fetch(`${GRAPH}${itemPath(rootId)}:/${INDEX_NAME}:/content`, { headers: { Authorization: 'Bearer ' + await getToken() } }); }
     const d = await res.json();
-    return (d && (d.v === 1 || d.v === 2) && d.rootId === rootId) ? d : null;
+    return (d && [1, 2, 3].includes(d.v) && d.rootId === rootId) ? d : null;
   } catch(e){ return null; }
 }
 function hydrate(d, rootName){
-  lib = { folders: new Map(), playlists: [], tracks: new Map(), at: d.at };
-  const mk = (path, id, name) => ({ id, name, folder: path, path: path ? path + '/' + name : name, url: '', urlAt: 0 });
-  const KEYS = ['t','a','aa','al','g','y','n','d'];
-  d.f.forEach(([path, tracks, images]) => {
-    lib.folders.set(path, {
-      path, name: path ? path.split('/').pop() : rootName,
-      tracks: tracks.map(r => {
-        const x = { ...mk(path, r[0], r[1]), title: r[1].replace(/\.[^.]+$/, '').replace(/_/g, ' ') };
-        if (Array.isArray(r[2])){ x.tags = {}; KEYS.forEach((k, i) => { const v = r[2][i]; if (v) x.tags[k] = v; }); }
-        lib.tracks.set(x.id, x); return x;
-      }),
-      images: images.map(i => mk(path, i[0], i[1]))
-    });
+  const nodes = new Map(), ids = [];
+  d.f.forEach((f, i) => { ids[i] = f[0]; nodes.set(f[0], { id: f[0], pid: f[1] >= 0 ? ids[f[1]] : null, name: f[2], d: 1 }); });
+  d.t.forEach(r => {
+    const n = { id: r[0], pid: ids[r[1]], name: r[2], k: 't', sz: r[3] || 0, url: '', urlAt: 0, title: r[2].replace(/\.[^.]+$/, '').replace(/_/g, ' ') };
+    if (Array.isArray(r[4])){ n.tags = {}; TAG_KEYS.forEach((k, i) => { if (r[4][i]) n.tags[k] = r[4][i]; }); }
+    nodes.set(n.id, n);
   });
-  lib.playlists = d.p.map(p => ({ ...mk(p[2], p[0], p[1]), title: p[1].replace(/\.[^.]+$/, '') }));
-  indexLib();
+  d.p.forEach(r => nodes.set(r[0], { id: r[0], pid: ids[r[1]], name: r[2], k: 'p', sz: 0, url: '', urlAt: 0, title: r[2].replace(/\.[^.]+$/, '') }));
+  d.i.forEach(r => nodes.set(r[0], { id: r[0], pid: ids[r[1]], name: r[2], k: 'i', sz: 0, url: '', urlAt: 0 }));
+  lib = Object.assign(emptyLib(), { nodes, at: d.at, rid: d.rid, rootName, delta: d.dl || '' });
+  rebuild();
+}
+function serializeIndex(rootId){
+  const order = [], idx = new Map(), kids = new Map();
+  lib.nodes.forEach(n => { if (n.d && n.id !== lib.rid) (kids.get(n.pid) || kids.set(n.pid, []).get(n.pid)).push(n); });
+  const q = [lib.nodes.get(lib.rid)];
+  for (let h = 0; h < q.length; h++){ const n = q[h]; idx.set(n.id, order.length); order.push(n); (kids.get(n.id) || []).forEach(c => q.push(c)); }
+  const f = order.map(n => [n.id, n.pid != null && idx.has(n.pid) ? idx.get(n.pid) : -1, n.name]);
+  const t = [], p = [], im = [];
+  lib.nodes.forEach(n => {
+    if (n.d) return; const pi = idx.get(n.pid); if (pi === undefined) return;
+    if (n.k === 't'){ const g = n.tags; t.push([n.id, pi, n.name, n.sz || 0, g ? [g.t||'', g.a||'', g.aa||'', g.al||'', g.g||'', g.y||'', g.n||0, g.d||0] : 0]); }
+    else if (n.k === 'p') p.push([n.id, pi, n.name]);
+    else im.push([n.id, pi, n.name]);
+  });
+  return JSON.stringify({ v: 3, rootId, rid: lib.rid, at: lib.at || Date.now(), dl: lib.delta || '', f, t, p, i: im });
 }
 async function saveIndex(rootId){
-  const row = t => { const g = t.tags; return [t.id, t.name, g ? [g.t||'', g.a||'', g.aa||'', g.al||'', g.g||'', g.y||'', g.n||0, g.d||0] : 0]; };
-  const payload = {
-    v: 2, rootId, at: lib.at || Date.now(),
-    f: [...lib.folders.values()].map(f => [f.path, f.tracks.map(row), f.images.map(i => [i.id, i.name])]),
-    p: lib.playlists.map(p => [p.id, p.name, p.folder])
-  };
-  const body = JSON.stringify(payload);
-  if (body.length > 3.5e6) throw new Error('library too large to save');
-  await gsend(`${itemPath(rootId)}:/${INDEX_NAME}:/content`, 'PUT', body, 'application/json');
+  const body = serializeIndex(rootId);
+  if (body.length < 3.5e6){ await gsend(`${itemPath(rootId)}:/${INDEX_NAME}:/content`, 'PUT', body, 'application/json'); return; }
+  const sess = await gsend(`${itemPath(rootId)}:/${INDEX_NAME}:/createUploadSession`, 'POST', { item: { '@microsoft.graph.conflictBehavior': 'replace' } });
+  if (!sess || !sess.uploadUrl) throw new Error('could not start upload');
+  await putChunks(sess.uploadUrl, new Blob([body], { type: 'application/json' }));
 }
-const saveIndexQuiet = async () => { const r = store.get('root'); if (!r) return; try { await saveIndex(r.id); } catch(e){ flash('Could not save index: ' + e.message); } };
+const saveIndexQuiet = async () => {
+  const r = store.get('root'); if (!r) return false;
+  try { await saveIndex(r.id); return true; } catch(e){ setStatus('Could not save index: ' + e.message); return false; }
+};
 
 /* =================================================================
    ID3 TAGS (read + write). Self-contained, no libraries.
@@ -648,14 +809,15 @@ async function readRange(t, start, end){
   return concat(...chunks).subarray(0, end - start + 1);
 }
 async function readTags(t){
-  let buf = await readRange(t, 0, 32767);
+  let buf = await readRange(t, 0, 16383);
   let tag = readID3(buf);
   if (tag && tag.need > buf.length){ buf = await readRange(t, 0, Math.min(tag.need, 1 << 20) - 1); tag = readID3(buf); }
   t.tags = tag ? tagsFromFrames(tag) : {};
 }
 async function writeTags(t, ch){
   const bytes = new Uint8Array(await (await fetchFile(t)).arrayBuffer());
-  await uploadReplace(t, new Blob(rewriteID3(bytes, ch)));
+  const blob = new Blob(rewriteID3(bytes, ch));
+  await uploadReplace(t, blob); t.sz = blob.size;
   const nt = { ...tg(t) };
   for (const k of Object.keys(ch)){
     const v = String(ch[k]).trim();
@@ -667,6 +829,27 @@ async function writeTags(t, ch){
 }
 
 let tagJob = null;
+function refreshTagBtn(){ const b = document.querySelector('[data-d="tags"]'); if (b) b.textContent = tagJob ? 'Stop reading tags' : 'Read tags'; }
+async function readTagsList(list, job){
+  let done = 0, fail = 0, lastErr = '';
+  const chunks = []; for (let c = 0; c < list.length; c += 120) chunks.push(list.slice(c, c + 120));
+  let nextUrls = prefetchUrls(chunks[0] || []);
+  for (let c = 0; c < chunks.length && !job.stop; c++){
+    await nextUrls;
+    if (c + 1 < chunks.length) nextUrls = prefetchUrls(chunks[c + 1]);
+    const chunk = chunks[c]; let k = 0;
+    const worker = async () => {
+      while (!job.stop){
+        const t = chunk[k++]; if (!t) return;
+        try { await readTags(t); } catch(e){ fail++; lastErr = e.message; }
+        done++;
+        if (done % 5 === 0 || done === list.length) setStatus(`Reading tags ${done}/${list.length}…` + (fail ? ` (${fail} failed)` : ''));
+      }
+    };
+    await Promise.all(Array.from({ length: 12 }, worker));
+  }
+  return { done, fail, lastErr };
+}
 async function readAllTags(){
   if (tagJob){ tagJob.stop = true; return; }
   let list = [...lib.tracks.values()].filter(t => !t.tags);
@@ -674,23 +857,13 @@ async function readAllTags(){
     if (!lib.tracks.size || !confirm('Tags have already been read for every track. Read them all again?')) return;
     list = [...lib.tracks.values()];
   }
-  const job = tagJob = { stop: false }; $('readTags').textContent = 'Stop';
-  let done = 0, fail = 0, i = 0, lastErr = '';
-  const worker = async () => {
-    while (!job.stop){
-      const t = list[i++]; if (!t) return;
-      try { await readTags(t); } catch(e){ fail++; lastErr = e.message; }
-      done++;
-      if (done % 5 === 0 || done === list.length) $('libStatus').textContent = `Reading tags ${done}/${list.length}…` + (fail ? ` (${fail} failed)` : '');
-    }
-  };
-  await Promise.all(Array.from({ length: 6 }, worker));
-  tagJob = null; $('readTags').textContent = 'Read tags';
+  const job = tagJob = { stop: false }; refreshTagBtn();
+  const r = await readTagsList(list, job);
+  tagJob = null; refreshTagBtn();
   lib.at = Date.now(); renderLibrary();
-  if (fail && fail === done) { flash('Could not read tags: ' + lastErr); return; }
-  flash(libSummary() + (fail ? ` · ${fail} files failed (${lastErr})` : '') + ' · saving index…');
-  await saveIndexQuiet();
-  if (!/Could not/.test($('libStatus').textContent)) flash(libSummary() + ' · index saved');
+  if (r.fail && r.fail === r.done){ setStatus('Could not read tags: ' + r.lastErr); return; }
+  setStatus(libSummary() + (r.fail ? ` · ${r.fail} files failed (${r.lastErr})` : '') + ' · saving index…');
+  if (await saveIndexQuiet()) setStatus(libSummary() + ' · index saved');
 }
 
 /* ---------- Grouping / sorting / rendering ---------- */
@@ -783,7 +956,7 @@ function renderLibrary(){
   html += `<h3>${VIEW_TITLES[view]}</h3>`;
   if (view !== 'folders'){
     let untagged = 0; lib.tracks.forEach(t => { if (!t.tags) untagged++; });
-    if (untagged) html += `<p class="status">Tags have not been read for ${untagged} tracks yet. Press “Read tags” to organise by tag.</p>`;
+    if (untagged) html += `<p class="status">Tags have not been read for ${untagged} tracks yet. Open ⚙ Settings and choose “Read tags” to organise by tag.</p>`;
   }
   curGroups.forEach((g, gi) => {
     const checked = sel.has(`g:${view}:${g.key}`) ? 'checked' : '';
@@ -818,9 +991,6 @@ let st; $('search').addEventListener('input', () => { clearTimeout(st); st = set
 $('viewSel').value = store.get('view') || 'folders'; $('sortSel').value = store.get('sort') || 'default';
 $('viewSel').addEventListener('change', () => { store.set('view', $('viewSel').value); sel.clear(); updateDlBtn(); renderLibrary(); });
 $('sortSel').addEventListener('change', () => { store.set('sort', $('sortSel').value); renderLibrary(); });
-$('changeFolder').addEventListener('click', openPicker);
-$('rescan').addEventListener('click', () => { const r = store.get('root'); if (r) openLibrary(r.id, r.name, true); });
-$('readTags').addEventListener('click', readAllTags);
 $('newPl').addEventListener('click', () => openPlaylistEditor(null));
 $('dlBtn').addEventListener('click', openDownloadDialog);
 $('shuffleAll').addEventListener('click', () => {
@@ -912,8 +1082,8 @@ async function savePlaylist(p, name, tracks){
     const exists = f => lib.playlists.some(x => !x.folder && x.name.toLowerCase() === f.toLowerCase());
     while (exists(fname)) fname = `${base} (${n++}).m3u8`;
     const r = await gsend(`${itemPath(root.id)}:/${encodeURIComponent(fname)}:/content`, 'PUT', buildM3U('', tracks), 'text/plain');
-    p = { id: r.id, name: fname, title: fname.replace(/\.[^.]+$/, ''), folder: '', path: fname, url: '', urlAt: 0, tracks: tracks.slice() };
-    lib.playlists.push(p); lib.playlists.sort((a, b) => cmpS(a.name, b.name));
+    p = { id: r.id, pid: lib.rid, k: 'p', sz: 0, name: fname, title: fname.replace(/\.[^.]+$/, ''), folder: '', path: fname, url: '', urlAt: 0, tracks: tracks.slice() };
+    lib.nodes.set(p.id, p); lib.playlists.push(p); lib.playlists.sort((a, b) => cmpS(a.name, b.name));
   }
   indexLib(); lib.at = Date.now(); renderLibrary(); saveIndexQuiet();
   return p;
@@ -974,7 +1144,7 @@ async function openPlaylistEditor(p){
     },
     del: async () => {
       if (!confirm(`Delete “${p.name}” from OneDrive?`)) return;
-      try { await gsend(itemPath(p.id), 'DELETE'); lib.playlists = lib.playlists.filter(x => x !== p); sel.delete('p:' + p.id); updateDlBtn(); lib.at = Date.now(); renderLibrary(); saveIndexQuiet(); dlg.close(); flash('Playlist deleted'); }
+      try { await gsend(itemPath(p.id), 'DELETE'); lib.nodes.delete(p.id); lib.playlists = lib.playlists.filter(x => x !== p); sel.delete('p:' + p.id); updateDlBtn(); lib.at = Date.now(); renderLibrary(); saveIndexQuiet(); dlg.close(); flash('Playlist deleted'); }
       catch(e){ $('edMsg').textContent = 'Could not delete: ' + e.message; }
     }
   });
@@ -1208,12 +1378,39 @@ if ('mediaSession' in navigator){
   navigator.mediaSession.setActionHandler('nexttrack', () => next(false));
 }
 
+/* ---------- Settings (account, folder, library maintenance, appearance) ---------- */
+function openSettings(){
+  const r = store.get('root'), signed = !!tok, dark = document.documentElement.dataset.theme === 'dark';
+  let h = '<h2>Settings</h2>';
+  h += '<div class="sgroup"><h3>Account</h3>' + (signed
+    ? `<p>Signed in${userName ? ' as <b>' + esc(userName) + '</b>' : ''}</p><div class="dbtns"><button class="btn small" data-d="signout">Sign out</button></div>`
+    : '<p class="muted">Not signed in.</p><div class="dbtns"><button class="btn small primary" data-d="signin">Sign in with Microsoft</button></div>') + '</div>';
+  if (signed){
+    h += `<div class="sgroup"><h3>Music folder</h3><p>${r ? esc(r.name) : 'None selected'}</p><div class="dbtns"><button class="btn small" data-d="folder">Change folder</button></div></div>`;
+    h += `<div class="sgroup"><h3>Library</h3><p class="muted">${libSummary()}<br>Last updated: ${lib.at ? esc(new Date(lib.at).toLocaleString()) : 'never'}<br>Quick update: ${lib.delta ? 'ready' : 'needs one full rescan first'}</p>
+      <div class="dbtns"><button class="btn small primary" data-d="quick" ${lib.delta ? '' : 'disabled'}>Update changes</button><button class="btn small" data-d="full">Full rescan</button><button class="btn small" data-d="tags">${tagJob ? 'Stop reading tags' : 'Read tags'}</button></div>
+      <label class="opt"><input type="checkbox" id="autoUp" ${store.get('autoUpdate') ? 'checked' : ''}><span>Check for changes when the app opens</span></label></div>`;
+  }
+  h += `<div class="sgroup"><h3>Appearance</h3><div class="dbtns"><button class="btn small ${dark ? '' : 'primary'}" data-d="light">Light</button><button class="btn small ${dark ? 'primary' : ''}" data-d="dark">Dark</button></div></div>
+    <div class="status" id="setMsg"></div><div class="dbtns"><button class="btn" data-d="close">Close</button></div>`;
+  openDlg(h, {
+    signout: () => { dlg.close(); signOut(); },
+    signin: () => signIn(),
+    folder: () => { dlg.close(); openPicker(); },
+    quick: () => quickUpdate(),
+    full: () => { const rt = store.get('root'); if (rt) openLibrary(rt.id, rt.name, true); },
+    tags: () => readAllTags(),
+    light: () => { setTheme('light'); openSettings(); },
+    dark: () => { setTheme('dark'); openSettings(); },
+    change: e => { if (e.target.id === 'autoUp') store.set('autoUpdate', e.target.checked); }
+  });
+}
+
 /* ---------- Boot ---------- */
 $('signIn').addEventListener('click', signIn);
-$('signOut').addEventListener('click', signOut);
+$('settingsBtn').addEventListener('click', openSettings);
 syncToggles();
 setTheme(store.get('theme') || CONFIG.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
-$('themeBtn').addEventListener('click', () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
 initAuth();
 </script>
 </body>
