@@ -200,7 +200,7 @@ header .ico{font-size:1.35rem;width:44px;height:44px}
         <div id="libraryBody"></div>
       </div>
       <div class="pane" id="rightPane">
-        <div class="seggroup"><button class="seg on" id="tabPl" data-ra="tabPl">Playlists</button><button class="seg" id="tabBuild" data-ra="tabBuild">Build list (0)</button></div>
+        <div class="seggroup"><button class="seg on" id="tabPl" data-ra="tabPl">Playlists</button><button class="seg" id="tabBuild" data-ra="tabBuild">Build list (0)</button><button class="seg" id="tabRecent" data-ra="tabRecent">Recent</button></div>
         <div id="rightBody"></div>
       </div>
     </div>
@@ -354,7 +354,7 @@ async function gsend(path, method, body, contentType){
   return res.status === 204 ? null : res.json().catch(() => null);
 }
 async function listChildren(id, cb){
-  let url = `${itemPath(id)}/children?$top=200&$select=id,name,size,folder,file,audio,lastModifiedDateTime`;
+  let url = `${itemPath(id)}/children?$top=200&$select=id,name,size,folder,file,audio,lastModifiedDateTime,createdDateTime`;
   while (url){
     const d = await gfetch(url);
     d.value.forEach(cb);
@@ -426,47 +426,17 @@ function show(id){ ['vSignedOut','vPicker','vLibrary'].forEach(v => $(v).classLi
 /* ---------- Folder picker ---------- */
 let pickStack = [{ id:'root', name:'OneDrive' }];
 function openPicker(){ show('vPicker'); pickStack = [{ id:'root', name:'OneDrive' }]; loadPicker(); }
-let pickGen = 0;
-// One $batch call per 20 folders; a 404 just means "no library file here".
-async function indexInfo(folders){
-  const out = new Map();
-  for (let i = 0; i < folders.length; i += 20){
-    const g = folders.slice(i, i + 20);
-    try {
-      const r = await fetch(GRAPH + '/$batch', { method: 'POST',
-        headers: { Authorization: 'Bearer ' + await getToken(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requests: g.map((f, j) => ({ id: String(j), method: 'GET',
-          url: `${itemPath(f.id)}:/${INDEX_NAME}?$select=lastModifiedDateTime` })) }) });
-      if (!r.ok) continue;
-      (await r.json()).responses.forEach(x => {
-        if (x.status === 200 && x.body && x.body.lastModifiedDateTime) out.set(g[+x.id].id, x.body.lastModifiedDateTime);
-      });
-    } catch(e){}
-  }
-  return out;
-}
-const libBadge = d => `<span style="display:block;color:var(--accent);font-size:.85rem">✓ PMMP3 library · updated ${esc(new Date(d).toLocaleString())}</span>`;
 async function loadPicker(){
-  const cur = pickStack[pickStack.length - 1], gen = ++pickGen;
+  const cur = pickStack[pickStack.length - 1];
   $('crumbs').innerHTML = pickStack.map((c,i) => `<button data-i="${i}">${esc(c.name)}</button>`).join(' / ');
   $('pickStatus').textContent = 'Loading folders…'; $('folderList').innerHTML = '';
-  const folders = []; let curIdx = '';
-  try { await listChildren(cur.id, it => {
-    if (it.folder) folders.push(it);
-    else if (it.file && it.name === INDEX_NAME) curIdx = it.lastModifiedDateTime || '';
-  }); }
+  const folders = [];
+  try { await listChildren(cur.id, it => { if (it.folder) folders.push(it); }); }
   catch(e){ $('pickStatus').textContent = 'Could not load folders: ' + e.message; return; }
-  if (gen !== pickGen) return;
   folders.sort((a,b) => cmpS(a.name, b.name));
-  $('pickStatus').innerHTML = (curIdx ? `This folder has a PMMP3 library, updated ${esc(new Date(curIdx).toLocaleString())}. ` : '') + (folders.length ? '' : 'No subfolders here.');
+  $('pickStatus').textContent = folders.length ? '' : 'No subfolders here.';
   $('folderList').innerHTML = folders.map(f =>
     `<li><button class="row" data-id="${esc(f.id)}" data-name="${esc(f.name)}"><span class="cover" style="width:36px;height:36px;font-size:1rem">▸</span><span class="meta"><b>${esc(f.name)}</b><span>${f.folder.childCount} items</span></span></button></li>`).join('');
-  const found = await indexInfo(folders);
-  if (gen !== pickGen) return;   // user already navigated elsewhere
-  found.forEach((d, id) => {
-    const m = $('folderList').querySelector(`.row[data-id="${CSS.escape(id)}"] .meta`);
-    if (m) m.insertAdjacentHTML('beforeend', libBadge(d));
-  });
 }
 $('crumbs').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -535,7 +505,7 @@ function setInitialTags(n, audio){
 function resetTags(n){ n.tags = {}; n.tagState = MP3_RE.test(n.name) ? 'pending' : 'empty'; }
 function makeFile(it, pid, seed){
   const k = kindOf(it.name); if (!k) return null;
-  const n = { id: it.id, pid, name: it.name, k, sz: it.size || 0, modified: it.lastModifiedDateTime || '', url: '', urlAt: 0 };
+  const n = { id: it.id, pid, name: it.name, k, sz: it.size || 0, modified: it.lastModifiedDateTime || '', added: it.createdDateTime || '', url: '', urlAt: 0 };
   if (k === 't' || k === 'p') n.title = titleOf(it.name, k);
   if (k === 't'){
     // keep known tags unless the file changed (an empty stored size/time never counts as a change)
@@ -663,6 +633,7 @@ function applyChanges(raw){
           if (ex.tagState === 'pending') st.newTracks.push(ex);
         } else if (it.size) ex.sz = it.size;
         if (mod) ex.modified = mod;
+        if (!ex.added && it.createdDateTime) ex.added = it.createdDateTime;
       } else if (it.size) ex.sz = it.size;
       return;
     }
@@ -761,7 +732,7 @@ function hydrate(d, rootName){
   const nodes = new Map(), ids = [];
   d.f.forEach((f, i) => { ids[i] = f[0]; nodes.set(f[0], { id: f[0], pid: f[1] >= 0 ? ids[f[1]] : null, name: f[2], d: 1 }); });
   d.t.forEach(r => {
-    const n = { id: r[0], pid: ids[r[1]], name: r[2], k: 't', sz: r[3] || 0, modified: r[5] || '', url: '', urlAt: 0, title: titleOf(r[2], 't'), tags: {} };
+    const n = { id: r[0], pid: ids[r[1]], name: r[2], k: 't', sz: r[3] || 0, modified: r[5] || '', added: r[7] || '', url: '', urlAt: 0, title: titleOf(r[2], 't'), tags: {} };
     if (Array.isArray(r[4])) TAG_KEYS.forEach((k, i) => { if (r[4][i]) n.tags[k] = r[4][i]; });
     let ts = r[6];   // v4 stores the state; v3 did not, so derive it
     if (!['complete', 'empty', 'pending', 'error'].includes(ts)) ts = Object.keys(n.tags).length ? 'complete' : (Array.isArray(r[4]) ? 'empty' : 'pending');
@@ -782,7 +753,7 @@ function serializeIndex(rootId){
   const t = [], p = [], im = [];
   lib.nodes.forEach(n => {
     if (n.d) return; const pi = idx.get(n.pid); if (pi === undefined) return;
-    if (n.k === 't'){ const g = n.tags, has = g && Object.keys(g).length, ts = (!n.tagState || n.tagState === 'reading') ? 'pending' : n.tagState; t.push([n.id, pi, n.name, n.sz || 0, has ? [g.t||'', g.a||'', g.aa||'', g.al||'', g.g||'', g.y||'', g.n||0, g.d||0] : 0, n.modified || '', ts]); }
+    if (n.k === 't'){ const g = n.tags, has = g && Object.keys(g).length, ts = (!n.tagState || n.tagState === 'reading') ? 'pending' : n.tagState; t.push([n.id, pi, n.name, n.sz || 0, has ? [g.t||'', g.a||'', g.aa||'', g.al||'', g.g||'', g.y||'', g.n||0, g.d||0] : 0, n.modified || '', ts, n.added || '']); }
     else if (n.k === 'p') p.push([n.id, pi, n.name]);
     else im.push([n.id, pi, n.name]);
   });
@@ -1255,9 +1226,24 @@ function addToBuild(tracks, at){
   build.items = build.items.slice(0, i).concat(tracks, build.items.slice(i));
   renderRight(); flash(`Added ${tracks.length} track${tracks.length === 1 ? '' : 's'} to the list (${build.items.length} in total)`);
 }
+/* ---------- Recently added (time-based lists) ---------- */
+const RECENT = [['today','Today'],['yesterday','Yesterday'],['week','This week'],['lastweek','Last week'],['month','This month'],['lastmonth','Last month']];
+function recentRange(k){
+  const n = new Date(), day = new Date(n.getFullYear(), n.getMonth(), n.getDate());
+  const shift = (d, days) => { const x = new Date(d); x.setDate(x.getDate() + days); return x; };
+  const wk = shift(day, -((day.getDay() + 6) % 7)), mo = new Date(n.getFullYear(), n.getMonth(), 1);   // weeks start on Monday
+  return ({ today: [day, Infinity], yesterday: [shift(day, -1), day], week: [wk, Infinity], lastweek: [shift(wk, -7), wk],
+    month: [mo, Infinity], lastmonth: [new Date(n.getFullYear(), n.getMonth() - 1, 1), mo] })[k].map(Number);
+}
+// "Added" is the date the file first appeared in OneDrive; until a full rescan fills that in, the modified date stands in.
+function recentTracks(k){
+  const [a, b] = recentRange(k);
+  return [...lib.tracks.values()].map(t => [t, Date.parse(t.added || t.modified)]).filter(x => x[1] >= a && x[1] < b)
+    .sort((x, y) => y[1] - x[1]).map(x => x[0]);
+}
 function renderRight(){
   const body = $('rightBody'); if (!body) return;
-  $('tabPl').classList.toggle('on', rightTab === 'playlists'); $('tabBuild').classList.toggle('on', rightTab === 'build');
+  $('tabPl').classList.toggle('on', rightTab === 'playlists'); $('tabBuild').classList.toggle('on', rightTab === 'build'); $('tabRecent').classList.toggle('on', rightTab === 'recent');
   const n = build.items.length;
   $('tabBuild').textContent = `Build list (${n})`; $('mtabLists').textContent = n ? `Lists (${n})` : 'Lists';
   if (rightTab === 'playlists'){
@@ -1268,6 +1254,12 @@ function renderRight(){
         <button class="btn small" data-ra="addPl" data-id="${esc(p.id)}" title="Add all its tracks to the list">＋ Add</button>
         <button class="btn small" data-ra="editPl" data-id="${esc(p.id)}">Edit</button></li>`).join('') + '</ul>'
       : `<p class="muted" style="padding:14px 4px">${q ? 'No playlists match.' : 'No playlists yet. Use the Build list tab to make one.'}</p>`;
+    return;
+  }
+  if (rightTab === 'recent'){
+    body.innerHTML = '<p class="muted" style="padding:10px 4px 0">Tap a period to add the tracks that were added to your library in that time to the build list.</p><ul class="list">' +
+      RECENT.map(([k, l]) => { const c = recentTracks(k).length, dis = c ? '' : ' disabled';
+        return `<li class="prow"><button class="row" data-ra="recAdd" data-k="${k}"${dis}><span class="cover" style="width:36px;height:36px;font-size:1rem">◷</span><span class="meta"><b>${l}</b><span>${n0(c)} track${c === 1 ? '' : 's'}</span></span></button><button class="btn small" data-ra="recPlay" data-k="${k}"${dis}>Play</button></li>`; }).join('') + '</ul>';
     return;
   }
   const ed = build.editing;
@@ -1291,6 +1283,9 @@ rp.addEventListener('click', async e => {
   const msg = m => { const x = $('bMsg'); if (x) x.textContent = m; };
   if (a === 'tabPl') setRightTab('playlists');
   else if (a === 'tabBuild') setRightTab('build');
+  else if (a === 'tabRecent') setRightTab('recent');
+  else if (a === 'recAdd'){ const tr = recentTracks(el.dataset.k); if (tr.length) addToBuild(tr); }
+  else if (a === 'recPlay'){ const tr = recentTracks(el.dataset.k); if (tr.length) setQueue(tr, 0, (RECENT.find(r => r[0] === el.dataset.k) || [0, 'Recently added'])[1]); }
   else if (a === 'playPl' && p) playPlaylist(p);
   else if (a === 'addPl' && p){
     try { const tr = await playlistTracks(p); addToBuild(tr.slice()); if (p.missing) flash(`${p.missing} entries of “${p.title}” were not found in this folder`); }
