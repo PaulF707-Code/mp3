@@ -4,11 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>PMMP3</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563EB'/%3E%3Cg fill='%23fff'%3E%3Cellipse cx='21' cy='45' rx='7' ry='5.2' transform='rotate(-20 21 45)'/%3E%3Cellipse cx='41' cy='41' rx='7' ry='5.2' transform='rotate(-20 41 41)'/%3E%3Crect x='25.5' y='18' width='3.2' height='28'/%3E%3Crect x='45' y='14' width='3.2' height='28'/%3E%3Cpolygon points='25.5,17 48.2,12 48.2,19 25.5,24'/%3E%3C/g%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
-<link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#EEF2F6" id="themeColor">
 <style>
 
 :root {
@@ -27,11 +22,13 @@
   --accent-ink:    #FFFFFF;
 
   --danger:        #C92A2A;
+
+  --font:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
 }
 
-:root[data-theme="dark"]{--bg:#0c0c0d;--surface:#ffffff14;--surface-solid:#1b1b1d;--line:#363639;--text:#f1f1f2;--muted:#9c9ca3;--accent:#60A5FA;--accent-hover:#93C5FD;--accent-active:#3B82F6;--accent-tint:#1E3A8A;--accent-ink:#06142E;--danger:#ff8d7a}
+:root[data-theme="dark"]{--bg:#0c0c0d;--surface:#ffffff14;--surface-solid:#1b1b1d;--line:#363639;--text:#f1f1f2;--muted:#9c9ca3;--accent:#ff7a3d;--accent-ink:#1a0800;--danger:#ff8d7a}
 *{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.45}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:16px;line-height:1.45}
 body{padding-top:env(safe-area-inset-top,0px);padding-bottom:calc(110px + env(safe-area-inset-bottom,0px))}
 button{font:inherit;color:inherit;cursor:pointer}
 button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -66,10 +63,6 @@ details.album summary::-webkit-details-marker{display:none}
 .meta b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .meta span{color:var(--muted);font-size:.85rem}
 .tracks{padding:0 0 10px 74px}
-.albhead{display:flex;align-items:center;gap:8px;margin:12px 0 2px;padding:4px 8px;border-bottom:1px solid var(--line);color:var(--muted);font-size:.88rem}
-.albhead b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-weight:600}
-.tracks.byalb .trk{padding-left:12px}
-.albhead span{flex:none;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .track{display:flex;width:100%;gap:10px;background:none;border:0;text-align:left;padding:7px 8px;border-radius:6px;align-items:baseline}
 .track:hover{background:var(--surface)}
 .track.playing{color:var(--accent)}
@@ -223,7 +216,7 @@ header .ico{font-size:1.35rem;width:44px;height:44px}
     <div class="ctl">
       <button class="ico" id="bShuffle" title="Shuffle" aria-label="Shuffle">⤮</button>
       <button class="ico" id="bPrev" title="Previous" aria-label="Previous">⏮</button>
-      <button class="ico main" id="bPlay" title="Play/pause" aria-label="Play or pause"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
+      <button class="ico main" id="bPlay" title="Play/pause" aria-label="Play or pause">▶</button>
       <button class="ico" id="bNext" title="Next" aria-label="Next">⏭</button>
       <button class="ico" id="bRepeat" title="Repeat: off" aria-label="Repeat">⟳</button>
     </div>
@@ -248,14 +241,6 @@ const IMG_RE   = /\.(jpe?g|png|gif|webp)$/i;
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-// Every network call gets a timeout so one stuck request can never freeze a worker. The timer covers the wait for response headers only (not long downloads).
-async function tfetch(url, opts, ms){
-  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), ms || 25000);
-  try { return await fetch(url, Object.assign({}, opts || {}, { signal: ctl.signal })); }
-  catch(e){ if (ctl.signal.aborted) throw new Error('timed out'); throw e; }
-  finally { clearTimeout(timer); }
-}
-const withTimeout = (p, ms) => new Promise((res, rej) => { const id = setTimeout(() => rej(new Error('timed out')), ms); p.then(v => { clearTimeout(id); res(v); }, e => { clearTimeout(id); rej(e); }); });
 const store = {
   get(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } },
   set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
@@ -274,7 +259,6 @@ const THEMES = ['light', 'dark'];
 function setTheme(t){
   if (!THEMES.includes(t)) t = 'light';
   document.documentElement.dataset.theme = t; store.set('theme', t);
-  const m = document.getElementById('themeColor'); if (m) m.content = t === 'dark' ? '#0c0c0d' : '#EEF2F6';
 }
 
 /* ---------- Auth (OAuth 2.0 authorization code + PKCE, no library needed) ---------- */
@@ -286,11 +270,11 @@ let tok = store.get('tok');   // { access, refresh, exp, sv }
 if (tok && tok.sv !== SCOPE) tok = null;   // permissions changed: require a fresh sign-in
 
 async function tokenRequest(params){
-  const res = await tfetch(OAUTH + '/token', {
+  const res = await fetch(OAUTH + '/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ client_id: CONFIG.clientId, scope: SCOPE, ...params })
-  }, 30000);
+  });
   const d = await res.json().catch(() => ({}));
   if (!res.ok || !d.access_token) throw new Error(d.error_description || d.error || ('token request failed (' + res.status + ')'));
   tok = { access: d.access_token, refresh: d.refresh_token || (tok && tok.refresh), exp: Date.now() + (d.expires_in || 3600) * 1000, sv: SCOPE };
@@ -328,9 +312,8 @@ async function signIn(){
     });
   } catch(e){ $('cfgWarn').textContent = 'Sign-in failed: ' + e.message; }
 }
-function signOut(clear = true){
+function signOut(){
   stopPlayback(); tok = null; store.set('tok', null); store.set('root', null); userName = '';
-  if (clear) dbClearAll();
   lib = emptyLib(); resetTagQueue(); $('player').classList.add('hidden'); show('vSignedOut');
 }
 async function getToken(){
@@ -338,12 +321,11 @@ async function getToken(){
   if (tok && tok.refresh){
     try { await tokenRequest({ grant_type: 'refresh_token', refresh_token: tok.refresh }); return tok.access; } catch(e){}
   }
-  signOut(false); $('cfgWarn').textContent = 'Your session expired. Please sign in again.';
+  signOut(); $('cfgWarn').textContent = 'Your session expired. Please sign in again.';
   throw new Error('session expired');
 }
 let userName = '';
 function onSignedIn(){
-  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e){}
   gfetch('/me').then(d => { userName = d.userPrincipalName || d.displayName || ''; }).catch(() => {});
   const saved = store.get('root');
   if (saved) openLibrary(saved.id, saved.name, false); else openPicker();
@@ -351,17 +333,12 @@ function onSignedIn(){
 
 /* ---------- Graph helpers ---------- */
 const itemPath = id => id === 'root' ? '/me/drive/root' : `/me/drive/items/${encodeURIComponent(id)}`;
-let graphUntil = 0;   // when Graph says "slow down", every caller waits, not just the one that was refused
 async function gfetch(pathOrUrl, tries = 4){
   const url = pathOrUrl.startsWith('http') ? pathOrUrl : GRAPH + pathOrUrl;
   for (let i = 0; i < tries; i++){
-    const gw = Math.min(graphUntil - Date.now(), 15000); if (gw > 0) await sleep(gw);
-    let res;
-    try { res = await tfetch(url, { headers: { Authorization: 'Bearer ' + await getToken() } }, 30000); }
-    catch(e){ if (e.message === 'session expired' || i === tries - 1) throw e; await sleep(600 * 2 ** i); continue; }
+    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + await getToken() } });
     if (res.status === 429 || res.status === 503){
-      diagCount('graph429'); onThrottle();
-      const ra = (parseInt(res.headers.get('Retry-After')) || 2 ** i) * 1000; graphUntil = Math.max(graphUntil, Date.now() + ra); await sleep(ra); continue;
+      await sleep((parseInt(res.headers.get('Retry-After')) || 2 ** i) * 1000); continue;
     }
     if (!res.ok) throw new Error(`Graph ${res.status}`);
     return res.json();
@@ -372,16 +349,7 @@ async function gfetch(pathOrUrl, tries = 4){
 async function gsend(path, method, body, contentType){
   const headers = { Authorization: 'Bearer ' + await getToken() };
   if (body !== undefined) headers['Content-Type'] = contentType || 'application/json';
-  let res;
-  for (let i = 0; ; i++){
-    const gw = Math.min(graphUntil - Date.now(), 15000); if (gw > 0) await sleep(gw);
-    headers.Authorization = 'Bearer ' + await getToken();
-    res = await tfetch(GRAPH + path, { method, headers, body: body === undefined ? undefined : (contentType ? body : JSON.stringify(body)) }, 60000);
-    if ((res.status === 429 || res.status === 503) && i < 3){
-      const ra = (parseInt(res.headers.get('Retry-After')) || 2 ** (i + 1)) * 1000; graphUntil = Math.max(graphUntil, Date.now() + ra); diagCount('graph429'); await sleep(ra); continue;
-    }
-    break;
-  }
+  const res = await fetch(GRAPH + path, { method, headers, body: body === undefined ? undefined : (contentType ? body : JSON.stringify(body)) });
   if (!res.ok) throw new Error(res.status === 401 || res.status === 403 ? 'no write permission (sign out and sign in again)' : 'OneDrive ' + res.status);
   return res.status === 204 ? null : res.json().catch(() => null);
 }
@@ -406,23 +374,20 @@ async function prefetchUrls(list){
   for (let i = 0; i < need.length; i += 20) groups.push(need.slice(i, i + 20));
   await Promise.all(groups.map(async g => {
     try {
-      // No $select: some accounts leave the download link out of a $select'ed response, while a plain item request always carries it.
-      const r = await tfetch(GRAPH + '/$batch', { method: 'POST',
+      const r = await fetch(GRAPH + '/$batch', { method: 'POST',
         headers: { Authorization: 'Bearer ' + await getToken(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requests: g.map((t, i) => ({ id: String(i), method: 'GET', url: itemPath(t.id) })) }) }, 30000);
-      if (!r.ok){ diagCount('pfHttp' + r.status); return; }
+        body: JSON.stringify({ requests: g.map((t, i) => ({ id: String(i), method: 'GET', url: `${itemPath(t.id)}?$select=id,@microsoft.graph.downloadUrl` })) }) });
+      if (!r.ok) return;
       (await r.json()).responses.forEach(x => {
         const u = x.status === 200 && x.body && x.body['@microsoft.graph.downloadUrl'];
-        if (u){ const t = g[+x.id]; t.url = u; t.urlAt = Date.now(); diagCount('pfOk'); }
-        else if (x.status === 200){ diagCount('pfNoLink'); if (!dC.pfSample) dC.pfSample = Object.keys(x.body || {}).slice(0, 12).join(','); }
-        else { diagCount('pfSub' + x.status); if (x.status === 429 || x.status === 503) onThrottle(); }
+        if (u){ const t = g[+x.id]; t.url = u; t.urlAt = Date.now(); }
       });
-    } catch(e){ diagCount('pfErr'); }
+    } catch(e){}
   }));
 }
 async function fetchFile(t){
   let res;
-  try { res = await tfetch(await freshUrl(t), {}, 30000); }
+  try { res = await fetch(await freshUrl(t)); }
   catch(e){ throw new Error('the browser could not read the file contents'); }
   if (!res.ok) throw new Error('download failed (' + res.status + ')');
   return res;
@@ -430,7 +395,7 @@ async function fetchFile(t){
 async function fetchText(item){
   try { return await (await fetchFile(item)).text(); }
   catch(_){
-    const r = await tfetch(`${GRAPH}${itemPath(item.id)}/content`, { headers: { Authorization: 'Bearer ' + await getToken() } }, 60000);
+    const r = await fetch(`${GRAPH}${itemPath(item.id)}/content`, { headers: { Authorization: 'Bearer ' + await getToken() } });
     if (!r.ok) throw new Error('could not read ' + item.name);
     return r.text();
   }
@@ -441,7 +406,7 @@ async function putChunks(uploadUrl, blob){
   while (pos < size){
     const end = Math.min(pos + CH, size);
     let res;
-    try { res = await tfetch(uploadUrl, { method: 'PUT', headers: { 'Content-Range': `bytes ${pos}-${end - 1}/${size}` }, body: blob.slice(pos, end) }, 120000); }
+    try { res = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Range': `bytes ${pos}-${end - 1}/${size}` }, body: blob.slice(pos, end) }); }
     catch(e){ throw new Error('upload blocked by the browser'); }
     if (![200, 201, 202].includes(res.status)) throw new Error('upload failed (' + res.status + ')');
     last = res; pos = end;
@@ -461,17 +426,47 @@ function show(id){ ['vSignedOut','vPicker','vLibrary'].forEach(v => $(v).classLi
 /* ---------- Folder picker ---------- */
 let pickStack = [{ id:'root', name:'OneDrive' }];
 function openPicker(){ show('vPicker'); pickStack = [{ id:'root', name:'OneDrive' }]; loadPicker(); }
+let pickGen = 0;
+// One $batch call per 20 folders; a 404 just means "no library file here".
+async function indexInfo(folders){
+  const out = new Map();
+  for (let i = 0; i < folders.length; i += 20){
+    const g = folders.slice(i, i + 20);
+    try {
+      const r = await fetch(GRAPH + '/$batch', { method: 'POST',
+        headers: { Authorization: 'Bearer ' + await getToken(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests: g.map((f, j) => ({ id: String(j), method: 'GET',
+          url: `${itemPath(f.id)}:/${INDEX_NAME}?$select=lastModifiedDateTime` })) }) });
+      if (!r.ok) continue;
+      (await r.json()).responses.forEach(x => {
+        if (x.status === 200 && x.body && x.body.lastModifiedDateTime) out.set(g[+x.id].id, x.body.lastModifiedDateTime);
+      });
+    } catch(e){}
+  }
+  return out;
+}
+const libBadge = d => `<span style="display:block;color:var(--accent);font-size:.85rem">✓ PMMP3 library · updated ${esc(new Date(d).toLocaleString())}</span>`;
 async function loadPicker(){
-  const cur = pickStack[pickStack.length - 1];
+  const cur = pickStack[pickStack.length - 1], gen = ++pickGen;
   $('crumbs').innerHTML = pickStack.map((c,i) => `<button data-i="${i}">${esc(c.name)}</button>`).join(' / ');
   $('pickStatus').textContent = 'Loading folders…'; $('folderList').innerHTML = '';
-  const folders = [];
-  try { await listChildren(cur.id, it => { if (it.folder) folders.push(it); }); }
+  const folders = []; let curIdx = '';
+  try { await listChildren(cur.id, it => {
+    if (it.folder) folders.push(it);
+    else if (it.file && it.name === INDEX_NAME) curIdx = it.lastModifiedDateTime || '';
+  }); }
   catch(e){ $('pickStatus').textContent = 'Could not load folders: ' + e.message; return; }
+  if (gen !== pickGen) return;
   folders.sort((a,b) => cmpS(a.name, b.name));
-  $('pickStatus').textContent = folders.length ? '' : 'No subfolders here.';
+  $('pickStatus').innerHTML = (curIdx ? `This folder has a PMMP3 library, updated ${esc(new Date(curIdx).toLocaleString())}. ` : '') + (folders.length ? '' : 'No subfolders here.');
   $('folderList').innerHTML = folders.map(f =>
     `<li><button class="row" data-id="${esc(f.id)}" data-name="${esc(f.name)}"><span class="cover" style="width:36px;height:36px;font-size:1rem">▸</span><span class="meta"><b>${esc(f.name)}</b><span>${f.folder.childCount} items</span></span></button></li>`).join('');
+  const found = await indexInfo(folders);
+  if (gen !== pickGen) return;   // user already navigated elsewhere
+  found.forEach((d, id) => {
+    const m = $('folderList').querySelector(`.row[data-id="${CSS.escape(id)}"] .meta`);
+    if (m) m.insertAdjacentHTML('beforeend', libBadge(d));
+  });
 }
 $('crumbs').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -483,7 +478,6 @@ $('folderList').addEventListener('click', e => {
 });
 $('useFolder').addEventListener('click', () => {
   const cur = pickStack[pickStack.length - 1];
-  const prev = store.get('root'); if (prev && prev.id !== cur.id) dbClear(prev.id);
   store.set('root', cur); openLibrary(cur.id, cur.name, false);
 });
 
@@ -507,7 +501,7 @@ const flash = setStatus;
 /* ---------- Library state ---------- */
 // The library is a graph of nodes keyed by OneDrive item id. Folders: {id,pid,name,d:1}.
 // Files: {id,pid,name,k:'t'|'p'|'i',sz,...}. Paths, folders and track lists are derived by rebuild().
-const emptyLib = () => ({ nodes: new Map(), folders: new Map(), playlists: [], tracks: new Map(), byPath: new Map(), byName: new Map(), at: 0, rid: '', rootId: '', rootName: '', delta: '' });
+const emptyLib = () => ({ nodes: new Map(), folders: new Map(), playlists: [], tracks: new Map(), byPath: new Map(), byName: new Map(), at: 0, rid: '', rootName: '', delta: '' });
 let lib = emptyLib();
 // The working list in the right panel: build it up, reorder it, then save it as a playlist or download it.
 const build = { name: '', editing: null, items: [] };
@@ -631,14 +625,12 @@ async function scan(rootId, rootName, seed){
   };
   await Promise.all(Array.from({ length: 10 }, worker));
   if (rootFailed && nodes.size === 1){ openPicker(); return; }
-  lib = Object.assign(emptyLib(), { nodes, at: Date.now(), rid, rootId, rootName, delta });
+  lib = Object.assign(emptyLib(), { nodes, at: Date.now(), rid, rootName, delta });
   resetTagQueue();
   rebuild(); renderLibrary();
   enqueueTagScan(pendingTracks());          // tags fill in behind the scenes; the library is usable now
-  setStatus(libSummary() + ' · saving…');
-  const local = await dbReplaceAll();
-  setStatus(libSummary() + (local ? ' · saved on this device' : '') + ' · backing up to OneDrive…');
-  if (await runSnapshotNow()) setStatus(libSummary() + (local ? ' · saved on this device' : '') + ' · backed up to OneDrive' + (delta ? '' : ' (quick update not available)'));
+  setStatus(libSummary() + ' · saving index…');
+  if (await saveIndexQuiet()) setStatus(libSummary() + ' · index saved to OneDrive' + (delta ? '' : ' (quick update not available)'));
 }
 
 /* ---------- Quick update (changes only, via OneDrive delta) ---------- */
@@ -712,21 +704,19 @@ async function quickUpdate(){
     if (!next) throw new Error('no change token returned');
     const before = new Set(lib.tracks.keys());
     const st = applyChanges(items);
-    lib.delta = next; metaDirty = true; scheduleFlush();
+    lib.delta = next;
     if (st.added || st.removed || st.changed){
       lib.at = Date.now(); rebuild();
       purgeTracks([...before].filter(id => !lib.tracks.has(id)));
       renderLibrary();
       enqueueTagScan(st.newTracks);
-      await dbReplaceAll(); requestSnapshot();
+      await saveIndexQuiet();
     }
     setStatus(`Up to date: ${st.added} added, ${st.removed} removed, ${st.changed} changed · ${libSummary()}`);
   } catch(e){
     busy = false;
-    if (/Graph (400|404|410)|no change token/.test(e.message)){   // the change token is no longer valid: only then is a full rescan needed
-      setStatus('The change token expired. Running a full rescan…');
-      const r = store.get('root'); if (r) await openLibrary(r.id, r.name, true);
-    } else setStatus('Could not check for changes (' + e.message + '). Your library is unchanged; it will retry next time.');
+    setStatus('Quick update failed (' + e.message + '). Running a full rescan…');
+    const r = store.get('root'); if (r) await openLibrary(r.id, r.name, true);
   } finally { busy = false; }
 }
 
@@ -736,25 +726,15 @@ const libSummary = () => `${lib.tracks.size} tracks · ${lib.playlists.length} p
 async function openLibrary(id, name, force){
   show('vLibrary'); $('libraryBody').innerHTML = '';
   if (!force){
-    setStatus('Loading library…');
-    const local = await dbLoad(id);                       // 1. this device: instant, no network
-    if (local && local.recs.some(r => r.id === local.meta.rid)){
-      hydrateLocal(local.meta, local.recs, name); renderLibrary();
-      setStatus(libSummary() + ' · loaded from this device');
-      return afterLoad();
-    }
-    let data = null, err = null;                          // 2. OneDrive backup snapshot (first run on this device)
-    for (let i = 0; i < 3; i++){
-      try { data = await loadIndex(id); err = null; break; }
-      catch(e){ err = e; await sleep(1500 * (i + 1)); }
-    }
-    if (err && !/unreadable/.test(err.message)){ showLoadError(err); return; }   // a failed read is not "no index": never rescan because of it
+    setStatus('Loading saved library…');
+    const data = await loadIndex(id);
     if (data && (data.v === 3 || data.v === 4)){
       hydrate(data, name); renderLibrary();
-      setStatus(libSummary() + ' · restored from the OneDrive backup (' + new Date(data.at).toLocaleString() + ')');
-      dbReplaceAll();                                     // copy it onto this device
-      if (data.v === 3) requestSnapshot();                // migrate the backup to v4 in due course
-      return afterLoad();
+      setStatus(libSummary() + ' · saved ' + new Date(data.at).toLocaleString());
+      enqueueTagScan(pendingTracks());                 // resumes any enrichment that was interrupted last time
+      if (data.v === 3) saveIndexQuiet();              // migrate the stored index to v4
+      if (lib.delta) quickUpdate();                    // always check for changes on open
+      return;
     }
     if (data){   // v1/v2 index: rescan once, keeping the tags already read
       const seed = new Map();
@@ -764,146 +744,18 @@ async function openLibrary(id, name, force){
       return scan(id, name, seed);
     }
   }
-  return scan(id, name);                                  // 3. nothing saved anywhere: scan
+  return scan(id, name);
 }
-function afterLoad(){
-  enqueueTagScan(pendingTracks());                        // resumes any enrichment that was interrupted last time
-  if (lib.delta) quickUpdate();                           // always check for changes on open
-}
-function showLoadError(err){
-  setStatus('Could not load the saved library: ' + err.message);
-  $('libraryBody').innerHTML = `<p class="status err">Could not load the saved library (${esc(err.message)}). Nothing was changed.</p><div class="dbtns"><button class="btn primary" data-act="retryLoad">Retry</button><button class="btn" data-act="fullScan">Scan folder instead</button></div>`;
-}
-// OneDrive copy of the index. Returns null ONLY when there is genuinely no usable index; transient failures throw so the caller can retry.
 async function loadIndex(rootId){
-  let meta;
-  try { meta = await gfetch(`${itemPath(rootId)}:/${INDEX_NAME}`); }
-  catch(e){ if (/Graph 404/.test(e.message)) return null; throw e; }
-  let res;
-  try { res = await tfetch(meta['@microsoft.graph.downloadUrl'], {}, 30000); if (!res.ok) throw 0; }
-  catch(_){
-    res = await tfetch(`${GRAPH}${itemPath(rootId)}:/${INDEX_NAME}:/content`, { headers: { Authorization: 'Bearer ' + await getToken() } }, 60000);
-    if (!res.ok) throw new Error('index download failed (' + res.status + ')');
-  }
-  let d; try { d = await res.json(); } catch(e){ throw new Error('index unreadable'); }
-  return (d && [1, 2, 3, 4].includes(d.v) && d.rootId === rootId) ? d : null;
-}
-
-/* ---------- Local database (IndexedDB): the primary store ---------- */
-// One record per node, so a finished tag read is a tiny write instead of re-saving the whole library.
-// OneDrive only holds a backup snapshot. If IndexedDB is unavailable everything falls back to that snapshot.
-const reqP = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
-const txP = tx => new Promise((res, rej) => { tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error || new Error('aborted')); });
-let dbp = null;
-function idb(){
-  if (dbp) return dbp;
-  dbp = new Promise(res => {
-    try {
-      if (!window.indexedDB) return res(null);
-      const rq = indexedDB.open('pmmp3', 1);
-      rq.onupgradeneeded = () => {
-        const d = rq.result;
-        d.createObjectStore('meta', { keyPath: 'rootId' });
-        d.createObjectStore('nodes', { keyPath: 'key' }).createIndex('byRoot', 'rootId');
-      };
-      rq.onsuccess = () => res(rq.result);
-      rq.onerror = rq.onblocked = () => res(null);
-    } catch(e){ res(null); }
-  });
-  return dbp;
-}
-const keyRange = rootId => IDBKeyRange.bound(rootId + '|', rootId + '|\uffff');
-function dbRec(n){
-  const r = { key: lib.rootId + '|' + n.id, rootId: lib.rootId, id: n.id, pid: n.pid, name: n.name };
-  if (n.d){ r.d = 1; return r; }
-  r.k = n.k; r.sz = n.sz || 0;
-  if (n.k === 't'){
-    r.modified = n.modified || ''; r.tags = n.tags || {};
-    r.tagState = (!n.tagState || n.tagState === 'reading') ? 'pending' : n.tagState;
-    if (n.tagError) r.tagError = n.tagError;
-  }
-  return r;
-}
-const dbMeta = () => ({ rootId: lib.rootId, v: 5, rid: lib.rid, rootName: lib.rootName, at: lib.at, delta: lib.delta || '' });
-async function dbLoad(rootId){
   try {
-    const d = await idb(); if (!d) return null;
-    const tx = d.transaction(['meta', 'nodes'], 'readonly');
-    const m = reqP(tx.objectStore('meta').get(rootId)), r = reqP(tx.objectStore('nodes').index('byRoot').getAll(rootId));
-    const [meta, recs] = await Promise.all([m, r]);
-    return (meta && meta.v === 5 && recs.length) ? { meta, recs } : null;
+    const meta = await gfetch(`${itemPath(rootId)}:/${INDEX_NAME}`);
+    let res;
+    try { res = await fetch(meta['@microsoft.graph.downloadUrl']); if (!res.ok) throw 0; }
+    catch(_){ res = await fetch(`${GRAPH}${itemPath(rootId)}:/${INDEX_NAME}:/content`, { headers: { Authorization: 'Bearer ' + await getToken() } }); }
+    const d = await res.json();
+    return (d && [1, 2, 3, 4].includes(d.v) && d.rootId === rootId) ? d : null;
   } catch(e){ return null; }
 }
-function hydrateLocal(meta, recs, rootName){
-  resetTagQueue();
-  const nodes = new Map();
-  recs.forEach(r => {
-    if (r.d){ nodes.set(r.id, { id: r.id, pid: r.pid, name: r.name, d: 1 }); return; }
-    const n = { id: r.id, pid: r.pid, name: r.name, k: r.k, sz: r.sz || 0, url: '', urlAt: 0 };
-    if (r.k === 't'){
-      n.modified = r.modified || ''; n.title = titleOf(r.name, 't'); n.tags = r.tags || {};
-      let ts = r.tagState;
-      if (!['complete', 'empty', 'pending', 'error'].includes(ts)) ts = Object.keys(n.tags).length ? 'complete' : 'pending';
-      if (ts === 'pending' && !MP3_RE.test(n.name)) ts = 'empty';
-      n.tagState = ts; if (r.tagError) n.tagError = r.tagError;
-    } else if (r.k === 'p') n.title = r.name.replace(/\.[^.]+$/, '');
-    nodes.set(n.id, n);
-  });
-  lib = Object.assign(emptyLib(), { nodes, at: meta.at, rid: meta.rid, rootId: meta.rootId, rootName, delta: meta.delta || '' });
-  rebuild();
-}
-// Write the whole library (after a scan, or when many things changed at once).
-async function dbReplaceAll(){
-  const rootId = lib.rootId; if (!rootId) return false;
-  try {
-    const d = await idb(); if (!d) return false;
-    dirty.clear(); metaDirty = false;
-    const tx = d.transaction(['meta', 'nodes'], 'readwrite'), ns = tx.objectStore('nodes');
-    ns.delete(keyRange(rootId));
-    lib.nodes.forEach(n => ns.put(dbRec(n)));
-    tx.objectStore('meta').put(dbMeta());
-    await txP(tx); return true;
-  } catch(e){ setStatus('Could not save to this device: ' + e.message); return false; }
-}
-// Write only what changed. touch() marks a node; changes are batched about 1.5 s apart.
-let dirty = new Set(), metaDirty = false, flushTimer = null, flushChain = Promise.resolve();
-function touch(n){ if (n) touchId(n.id); }
-function touchId(id){ dirty.add(id); scheduleFlush(); }
-function scheduleFlush(){ if (!flushTimer) flushTimer = setTimeout(flushDb, 1500); }
-function flushDb(){
-  clearTimeout(flushTimer); flushTimer = null;
-  flushChain = flushChain.then(doFlush).catch(() => {});
-  return flushChain;
-}
-async function doFlush(){
-  const rootId = lib.rootId; if (!rootId || (!dirty.size && !metaDirty)) return;
-  const d = await idb(); if (!d){ dirty.clear(); metaDirty = false; return; }
-  const ids = [...dirty]; dirty.clear(); metaDirty = false;
-  try {
-    const tx = d.transaction(['meta', 'nodes'], 'readwrite'), ns = tx.objectStore('nodes');
-    ids.forEach(id => { const n = lib.nodes.get(id); if (n) ns.put(dbRec(n)); else ns.delete(rootId + '|' + id); });   // a node that no longer exists is deleted
-    tx.objectStore('meta').put(dbMeta());
-    await txP(tx);
-  } catch(e){ ids.forEach(id => dirty.add(id)); metaDirty = true; }
-}
-async function dbClear(rootId){
-  try {
-    const d = await idb(); if (!d) return;
-    const tx = d.transaction(['meta', 'nodes'], 'readwrite');
-    tx.objectStore('nodes').delete(keyRange(rootId)); tx.objectStore('meta').delete(rootId);
-    await txP(tx);
-  } catch(e){}
-}
-async function dbClearAll(){
-  dirty.clear(); metaDirty = false;
-  try {
-    const d = await idb(); if (!d) return;
-    const tx = d.transaction(['meta', 'nodes'], 'readwrite');
-    tx.objectStore('meta').clear(); tx.objectStore('nodes').clear();
-    await txP(tx);
-  } catch(e){}
-}
-
 function hydrate(d, rootName){
   resetTagQueue();
   const nodes = new Map(), ids = [];
@@ -918,7 +770,7 @@ function hydrate(d, rootName){
   });
   d.p.forEach(r => nodes.set(r[0], { id: r[0], pid: ids[r[1]], name: r[2], k: 'p', sz: 0, url: '', urlAt: 0, title: r[2].replace(/\.[^.]+$/, '') }));
   d.i.forEach(r => nodes.set(r[0], { id: r[0], pid: ids[r[1]], name: r[2], k: 'i', sz: 0, url: '', urlAt: 0 }));
-  lib = Object.assign(emptyLib(), { nodes, at: d.at, rid: d.rid, rootId: d.rootId, rootName, delta: d.dl || '' });
+  lib = Object.assign(emptyLib(), { nodes, at: d.at, rid: d.rid, rootName, delta: d.dl || '' });
   rebuild();
 }
 function serializeIndex(rootId){
@@ -943,36 +795,19 @@ async function saveIndex(rootId){
   if (!sess || !sess.uploadUrl) throw new Error('could not start upload');
   await putChunks(sess.uploadUrl, new Blob([body], { type: 'application/json' }));
 }
-// OneDrive snapshot = backup / sync copy of the whole index. Uploads are serialized and coalesced (one runs, one waits, and it writes the latest state).
+// Saves are serialized and coalesced: at most one upload runs and one more waits (and it always writes the latest state).
 let saveChain = Promise.resolve(true), saveQueued = false, lastSaveAt = 0;
-const saveSnapshotQuiet = () => {
+const saveIndexQuiet = () => {
   if (saveQueued) return saveChain;
   saveQueued = true;
   saveChain = saveChain.then(async () => {
     saveQueued = false;
     const r = store.get('root'); if (!r) return false;
     try { await saveIndex(r.id); lastSaveAt = Date.now(); return true; }
-    catch(e){
-      setStatus('OneDrive backup delayed (' + e.message + '). Your library is saved on this device; retrying in a few minutes.');
-      snapDirty = true; clearTimeout(snapTimer); snapTimer = setTimeout(() => { snapTimer = null; runSnapshotNow(); }, 3 * 60 * 1000);
-      return false;
-    }
+    catch(e){ setStatus('Could not save index: ' + e.message); return false; }
   });
   return saveChain;
 };
-// The local database is saved continuously; the OneDrive copy only every few minutes, or right away when forced (scan finished, tag queue idle).
-let snapTimer = null, snapDirty = false;
-const SNAP_MIN_MS = 5 * 60 * 1000;
-function requestSnapshot(force){
-  if (!lib.rootId) return Promise.resolve(false);
-  snapDirty = true;
-  if (force){ clearTimeout(snapTimer); snapTimer = null; return runSnapshotNow(); }
-  if (!snapTimer) snapTimer = setTimeout(() => { snapTimer = null; runSnapshotNow(); }, Math.max(15000, (activeWorkers ? 2 * SNAP_MIN_MS : SNAP_MIN_MS) - (Date.now() - lastSaveAt)));
-  return Promise.resolve(false);
-}
-function runSnapshotNow(){ snapDirty = false; return saveSnapshotQuiet(); }
-// Save changed nodes locally now and schedule a OneDrive backup.
-function persist(...ids){ ids.forEach(touchId); const p = flushDb(); requestSnapshot(); return p; }
 
 /* =================================================================
    ID3 TAGS (read + write). Self-contained, no libraries.
@@ -1095,51 +930,43 @@ function rewriteID3(bytes, ch){
 /* ===ID3 END */
 
 let throttleUntil = 0;
-async function readRange(t, start, end, kind){
-  const t0 = performance.now();
+async function readRange(t, start, end){
   let lastErr = null;
   for (let attempt = 0; attempt < 4; attempt++){
-    const wait = Math.min(throttleUntil - Date.now(), 15000); if (wait > 0){ diagCount('waitMs', wait); await sleep(wait); }
-    if (stale(t)) diagCount('fallback');                                   // the prefetch missed this file: one extra Graph lookup
+    const wait = Math.min(throttleUntil - Date.now(), 15000); if (wait > 0) await sleep(wait);
     let res;
-    try { res = await tfetch(await freshUrl(t), { headers: { Range: `bytes=${start}-${end}` } }, 20000); }
+    try { res = await fetch(await freshUrl(t), { headers: { Range: `bytes=${start}-${end}` } }); }
     catch(e){
-      if (/^Graph|session expired/.test(e.message)) throw e;
-      diagCount(e.message === 'timed out' ? 'timeouts' : 'netErr');
-      lastErr = new Error(e.message === 'timed out' ? 'timed out waiting for OneDrive' : 'network error or access blocked by the browser'); await sleep(300 * 2 ** attempt); continue;
+      if (/^Graph/.test(e.message)) throw e;
+      lastErr = new Error('network error or access blocked by the browser'); await sleep(300 * 2 ** attempt); continue;
     }
     if (res.status === 416) return new Uint8Array(0);                     // empty file
     if (res.status === 429 || res.status === 503){
-      diagCount('read429');
-      throttleUntil = Date.now() + (parseInt(res.headers.get('Retry-After')) || 2 ** attempt) * 1000; onThrottle();
+      throttleUntil = Date.now() + (parseInt(res.headers.get('Retry-After')) || 2 ** attempt) * 1000;
       lastErr = new Error('throttled by OneDrive (HTTP ' + res.status + ')'); continue;
     }
-    if (res.status === 401 || res.status === 403){ diagCount('auth'); t.url = ''; lastErr = new Error('download link rejected (HTTP ' + res.status + ')'); continue; }
+    if (res.status === 401 || res.status === 403){ t.url = ''; lastErr = new Error('download link rejected (HTTP ' + res.status + ')'); continue; }
     if (!res.ok){
       lastErr = new Error('HTTP ' + res.status);
       if (res.status >= 500){ await sleep(300 * 2 ** attempt); continue; }
       throw lastErr;
     }
     const reader = res.body.getReader(), chunks = []; let total = 0;
-    try {
-      while (total <= end - start){ const r = await withTimeout(reader.read(), 15000); if (r.done) break; chunks.push(r.value); total += r.value.length; }
-    } catch(e){ diagCount('timeouts'); reader.cancel().catch(() => {}); lastErr = new Error('timed out reading the file'); continue; }
+    while (total <= end - start){ const r = await reader.read(); if (r.done) break; chunks.push(r.value); total += r.value.length; }
     reader.cancel().catch(() => {});
-    noteReadOk();
-    if (kind) diagAdd(kind, performance.now() - t0);
     return concat(...chunks).subarray(0, end - start + 1);
   }
   throw lastErr || new Error('failed');
 }
 // Reads only the start of the file (the ID3 tag). Never downloads the audio.
 async function readTags(t){
-  let buf = await readRange(t, 0, 32767, 'first');               // one round trip is the cost, so read enough to usually catch the whole tag
+  let buf = await readRange(t, 0, 8191);
   let tag = readID3(buf);
   if (!tag){ t.tags = {}; return; }
   let res = tagsFromFrames(tag);
   if (tag.truncated && !(res.t && res.a && res.al)){        // e.g. big cover art stored before the text frames
-    const end = Math.min(tag.total, 1 << 18) - 1;       // second read capped at 256 KB (was 1 MB)
-    if (end >= buf.length){ buf = await readRange(t, 0, end, 'second'); tag = readID3(buf); if (tag) res = tagsFromFrames(tag); }
+    const end = Math.min(tag.total, 1 << 20) - 1;
+    if (end >= buf.length){ buf = await readRange(t, 0, end); tag = readID3(buf); if (tag) res = tagsFromFrames(tag); }
   }
   t.tags = res;
 }
@@ -1154,55 +981,17 @@ async function writeTags(t, ch){
     else if (k === 'y'){ const m = v.match(/\d{4}/); if (m) nt[k] = m[0]; else delete nt[k]; }
     else if (v) nt[k] = v; else delete nt[k];
   }
-  t.tags = nt; t.tagState = Object.keys(nt).length ? 'complete' : 'empty'; t.tagError = ''; t.url = ''; t.urlAt = 0; touchId(t.id);
+  t.tags = nt; t.tagState = Object.keys(nt).length ? 'complete' : 'empty'; t.tagError = ''; t.url = ''; t.urlAt = 0;
 }
 
 /* ---------- Tag queue: the single background path that reads tags ---------- */
 // track.tagState: pending -> reading -> complete | empty | error
 let tagQueue = [], tagWorkersRunning = false;
-// Worker count adapts: starts wide (file reads go to the download host, not Graph), halves when OneDrive throttles, creeps back up while all is well.
-const TAG_START = 8, TAG_MIN = 2, TAG_MAX = 12, PAUSE_AFTER = 8, PREFETCH_AHEAD = 80;
-let tagTarget = TAG_START, okStreak = 0, lastThrottleAt = 0;
-let tagGen = 0, activeWorkers = 0, tagPaused = '', tagFails = 0, tagRenderDirty = false, tagSaveDirty = false, urlFill = null, tsTimer = null, resumeTimer = null, pauseRuns = 0;
-// Diagnostics: timings and counters for the tag reader, shown in Settings → Library → Diagnostics.
-const dT = {}, dC = {}; let dDone = [], dStart = 0;
-function diagAdd(k, ms){ const d = dT[k] || (dT[k] = { n: 0, ms: 0, max: 0 }); d.n++; d.ms += ms; if (ms > d.max) d.max = ms; }
-function diagCount(k, v){ dC[k] = (dC[k] || 0) + (v === undefined ? 1 : v); }
-function diagReset(){ Object.keys(dT).forEach(k => delete dT[k]); Object.keys(dC).forEach(k => delete dC[k]); dDone = []; dStart = 0; }
-function diagText(){
-  const f = k => { const d = dT[k]; return d ? `${d.n} × avg ${Math.round(d.ms / d.n)} ms, max ${Math.round(d.max)} ms` : 'none yet'; };
-  const done = dC.done || 0, last = dDone[dDone.length - 1] || 0, elapsed = last && dStart ? (last - dStart) / 1000 : 0;
-  const overall = done && elapsed > 0 ? (done / elapsed).toFixed(2) : '–';
-  let recent = '–';
-  if (dDone.length >= 5){ const span = (last - dDone[0]) / 1000; if (span > 0) recent = ((dDone.length - 1) / span).toFixed(2); }
-  const pfBad = Object.keys(dC).filter(k => /^pf(Http|Sub|Err)/.test(k)).map(k => (k === 'pfErr' ? 'request error' : 'HTTP ' + k.replace(/^pf(Http|Sub)/, '')) + ' ×' + dC[k]).join(', ');
-  let hint = '';
-  if (done >= 10 && elapsed > 0){
-    if ((dC.waitMs || 0) / 1000 / Math.max(1, tagTarget) > elapsed * 0.4) hint = 'Throttling is the main slowdown: workers spend much of their time waiting.';
-    else if ((dC.fallback || 0) > done * 0.3) hint = 'The download-link prefetch is missing many files, so each pays an extra lookup.';
-    else if (dT.first && dT.second && dT.second.n > dT.first.n * 0.3) hint = 'Many files need a second read (large cover art stored before the text tags).';
-    else if (dT.first && dT.first.ms / dT.first.n > 1500) hint = 'Each read itself is slow (network latency to OneDrive).';
-    else hint = 'No single bottleneck stands out.';
-  }
-  return [
-    `Speed: ${recent} files/s recent, ${overall} files/s overall (${n0(done)} read this session)`,
-    `Workers: ${activeWorkers} active, target ${tagTarget} (lowest ${dC.lowTarget === undefined ? tagTarget : dC.lowTarget}, max ${TAG_MAX})`,
-    `Queue: ${n0(tagQueue.length)} waiting` + (tagPaused ? `, PAUSED: ${tagPaused}` : ''),
-    `URL prefetch: ${f('prefetch')}; links obtained for ${n0(dC.pfGot || 0)} of ${n0(dC.pfWant || 0)} files`,
-    `Prefetch replies: ${n0(dC.pfOk || 0)} with link, ${n0(dC.pfNoLink || 0)} OK but no link` + (dC.pfSample ? ` (fields returned: ${dC.pfSample})` : '') + (pfBad ? `; failures: ${pfBad}` : ''),
-    `Single URL lookups (prefetch missed): ${n0(dC.fallback || 0)}`,
-    `First read (32 KB): ${f('first')}`,
-    `Second read (up to 256 KB): ${f('second')}`,
-    `Throttled: reads ${dC.read429 || 0}, Graph ${dC.graph429 || 0}; time workers spent waiting: ${((dC.waitMs || 0) / 1000).toFixed(1)} s`,
-    `Timeouts ${dC.timeouts || 0}, network errors ${dC.netErr || 0}, link rejected ${dC.auth || 0}`
-  ].concat(hint ? ['Hint: ' + hint] : []).join('\n');
-}
-function onThrottle(){ if (Date.now() - lastThrottleAt < 5000) return; lastThrottleAt = Date.now(); okStreak = 0; tagTarget = Math.max(TAG_MIN, tagTarget >> 1); dC.lowTarget = Math.min(dC.lowTarget === undefined ? tagTarget : dC.lowTarget, tagTarget); }
-function noteReadOk(){ if (++okStreak >= 40 && tagTarget < TAG_MAX){ okStreak = 0; tagTarget++; processTagQueue(); } }
+const TAG_WORKERS = 4, SAVE_EVERY = 25, SAVE_MIN_MS = 30000, PAUSE_AFTER = 8;
+let tagGen = 0, activeWorkers = 0, tagPaused = '', tagFails = 0, tagSinceSave = 0, tagRenderDirty = false, tagSaveDirty = false, urlFill = null, tsTimer = null;
 const pendingTracks = () => [...lib.tracks.values()].filter(t => t.tagState === 'pending');
 function resetTagQueue(){   // a new library replaces the old one: drop all queued work
-  tagGen++; tagQueue = []; activeWorkers = 0; tagWorkersRunning = false; tagPaused = ''; tagFails = 0; tagRenderDirty = tagSaveDirty = false;
-  clearTimeout(resumeTimer); resumeTimer = null; pauseRuns = 0; diagReset();
+  tagGen++; tagQueue = []; activeWorkers = 0; tagWorkersRunning = false; tagPaused = ''; tagFails = 0; tagSinceSave = 0; tagRenderDirty = tagSaveDirty = false;
 }
 function enqueueTagScan(tracks){
   tracks.forEach(t => { if (t.tagState === 'pending' && !t.queued){ t.queued = true; tagQueue.push(t); } });
@@ -1211,17 +1000,13 @@ function enqueueTagScan(tracks){
 function processTagQueue(){
   if (tagPaused) return;
   const gen = tagGen;
-  while (activeWorkers < Math.min(tagTarget, tagQueue.length)){ if (!dStart) dStart = Date.now(); activeWorkers++; tagWorkersRunning = true; tagWorker(gen); }
+  while (activeWorkers < Math.min(TAG_WORKERS, tagQueue.length)){ activeWorkers++; tagWorkersRunning = true; tagWorker(gen); }
 }
-// Download links for the next files are fetched 20 at a time (one Graph call per 20 files, not per file).
+// Download links for the next files are fetched 20 at a time instead of one Graph call per file.
 async function ensureUrl(t){
-  for (let i = 0; i < 3 && stale(t); i++){
-    if (!urlFill){
-      const batch = [t, ...tagQueue.slice(0, PREFETCH_AHEAD - 1)].filter(stale), t0 = performance.now();
-      urlFill = prefetchUrls(batch).then(() => { diagAdd('prefetch', performance.now() - t0); diagCount('pfWant', batch.length); diagCount('pfGot', batch.filter(x => !stale(x)).length); }).finally(() => { urlFill = null; });
-    }
-    await urlFill;
-  }
+  if (!stale(t)) return;
+  if (!urlFill) urlFill = prefetchUrls([t, ...tagQueue.slice(0, 59)].filter(stale)).finally(() => { urlFill = null; });
+  await urlFill;
 }
 async function readTrackTags(t){
   t.tagState = 'reading';
@@ -1229,45 +1014,34 @@ async function readTrackTags(t){
     await ensureUrl(t); await readTags(t);
     t.tagState = Object.keys(t.tags || {}).length ? 'complete' : 'empty'; t.tagError = '';
   } catch(e){ t.tagState = 'error'; t.tagError = e.message; throw e; }
-  finally { touch(t); }
 }
 async function tagWorker(gen){
   try {
-    while (gen === tagGen && !tagPaused && tagQueue.length && activeWorkers <= tagTarget){
+    while (gen === tagGen && !tagPaused && tagQueue.length){
       const t = tagQueue.shift(); t.queued = false;
       if (lib.nodes.get(t.id) !== t || t.tagState !== 'pending') continue;   // deleted, or already handled elsewhere
       try {
-        await readTrackTags(t); tagFails = 0; pauseRuns = 0; tagSaveDirty = tagRenderDirty = true; requestSnapshot();
-        diagCount('done'); dDone.push(Date.now()); if (dDone.length > 60) dDone.shift();
+        await readTrackTags(t); tagFails = 0; tagSaveDirty = tagRenderDirty = true;
+        if (++tagSinceSave >= SAVE_EVERY && Date.now() - lastSaveAt >= SAVE_MIN_MS){ tagSinceSave = 0; saveIndexQuiet(); }
       } catch(e){
         tagSaveDirty = tagRenderDirty = true;
-        if (++tagFails >= PAUSE_AFTER && !tagPaused){ tagPaused = e.message; scheduleAutoResume(); }   // nothing is working: stop hammering OneDrive
+        if (++tagFails >= PAUSE_AFTER && !tagPaused) tagPaused = e.message;    // nothing is working: stop hammering OneDrive
       }
       updateTagStatus();
     }
   } finally {
-    if (gen === tagGen){
-      activeWorkers--;
-      if (!activeWorkers){ if (tagQueue.length && !tagPaused) processTagQueue(); else tagQueueIdle(); }
-    }
+    if (gen === tagGen){ activeWorkers--; if (!activeWorkers) tagQueueIdle(); }
   }
 }
 function tagQueueIdle(){
   tagWorkersRunning = false;
-  if (tagSaveDirty){ tagSaveDirty = false; flushDb(); requestSnapshot(true); }
+  if (tagSaveDirty){ tagSaveDirty = false; saveIndexQuiet(); }
   if (tagRenderDirty){ tagRenderDirty = false; if (lib.tracks.size){ renderLibrary(); const a = document.activeElement; if (!a || a.id !== 'bName') renderRight(); } }
   updateTagStatus(true);
 }
-// After a pause the queue retries by itself in a minute (up to 5 times in a row without any success), so a bad patch of network never needs a button press.
-function scheduleAutoResume(){
-  if (resumeTimer || pauseRuns >= 5) return;
-  pauseRuns++;
-  resumeTimer = setTimeout(() => { resumeTimer = null; retryFailedTags(true); }, 60000);
-}
-function retryFailedTags(auto){
-  clearTimeout(resumeTimer); resumeTimer = null;
-  if (!auto) pauseRuns = 0;
-  [...lib.tracks.values()].filter(t => t.tagState === 'error').forEach(t => { t.tagState = 'pending'; t.tagError = ''; });
+function retryFailedTags(){
+  const failed = [...lib.tracks.values()].filter(t => t.tagState === 'error');
+  failed.forEach(t => { t.tagState = 'pending'; t.tagError = ''; });
   tagPaused = ''; tagFails = 0;
   enqueueTagScan(pendingTracks());
 }
@@ -1310,13 +1084,12 @@ function tagCounts(){
 }
 function updateTagStatus(now){
   if (!now){ if (!tsTimer) tsTimer = setTimeout(() => { tsTimer = null; updateTagStatus(true); }, 300); return; }
-  const a = document.getElementById('tagStatus'), b = document.getElementById('setTag'), rb = document.getElementById('retryBtn'), el = document.getElementById('errList'), eh = document.getElementById('errHead'), dg = document.getElementById('setDiag');
-  if (!a && !b && !rb && !el && !dg) return;
-  if (dg) dg.textContent = diagText();
+  const a = document.getElementById('tagStatus'), b = document.getElementById('setTag'), rb = document.getElementById('retryBtn'), el = document.getElementById('errList'), eh = document.getElementById('errHead');
+  if (!a && !b && !rb && !el) return;
   const c = tagCounts();
   if (a){
     a.textContent = (c.pending || c.error || tagPaused)
-      ? `Tags: ${n0(c.complete + c.empty)} done · ${n0(c.pending)} pending · ${n0(c.error)} errors` + (tagPaused ? ` · paused (${tagPaused}). ` + (resumeTimer ? 'Retrying automatically in a minute.' : 'Open Settings → Retry failed tags.') : '')
+      ? `Tags: ${n0(c.complete + c.empty)} done · ${n0(c.pending)} pending · ${n0(c.error)} errors` + (tagPaused ? ` · paused (${tagPaused}). Open Settings → Retry failed tags.` : '')
       : '';
     a.title = a.textContent; a.classList.toggle('err', !!tagPaused);
   }
@@ -1382,11 +1155,7 @@ function buildGroups(q){
     });
     groups.sort((a, b) => /^Unknown/.test(a.name) - /^Unknown/.test(b.name) || cmpS(a.name, b.name));
   }
-  let cmp = trackCmp(sortBy, view);
-  if ((view === 'genre' || view === 'year') && ['album', 'default'].includes(sortBy)){   // albums are shown as headings, so keep each artist's albums together
-    const alb = trackCmp('album', view);
-    cmp = (x, y) => cmpS(artistKey(x), artistKey(y)) || alb(x, y);
-  }
+  const cmp = trackCmp(sortBy, view);
   groups.forEach(g => g.tracks.sort(cmp));
   if (q){
     groups = groups.map(g => {
@@ -1437,35 +1206,17 @@ function renderLibrary(){
   $('libraryBody').innerHTML = html;
   $('libraryBody').querySelectorAll('details[open]').forEach(fillTracks);
   markPlaying(); observeLazy(); updateTagStatus(true);
-  if (rightTab === 'playlists') renderRight();      // the playlist list depends on the library, so refresh it too (it was empty on first load)
 }
-const artistKey = t => { const a = tg(t); return a.aa || a.a || 'Unknown artist'; };
-// Identifies "the album a track sits under" in a view. In Artist view the artist is the group, so the album name is enough;
-// in Genre/Year views the artist is part of the key (two artists can both have a "Greatest Hits"). Lower-cased so case differences don't split an album.
-const albumKeyOf = (t, view) => { const al = tg(t).al || 'Unknown album'; return (view === 'artist' ? al : artistKey(t) + ' ¦ ' + al).toLowerCase(); };
 function fillTracks(d){
   if (d.dataset.filled) return;
   const g = curGroups[+d.dataset.gi]; if (!g) return;
   const view = $('viewSel').value;
-  // Artist, Genre and Year views in album order (also their default order): show each album as a heading above its tracks.
-  const headed = ['artist', 'genre', 'year'].includes(view) && ['album', 'default'].includes($('sortSel').value);
-  let prev = null, n = 0, html = '';
-  g.tracks.forEach(t => {
-    const a = tg(t), key = headed ? albumKeyOf(t, view) : '';
-    if (headed && key !== prev){
-      prev = key; n = 0;
-      const sub = [view !== 'artist' ? artistKey(t) : '', view !== 'year' && a.y ? a.y : ''].filter(Boolean).join(' · ');
-      html += `<div class="albhead"><b>${esc(a.al || 'Unknown album')}</b>${sub ? `<span>${esc(sub)}</span>` : ''}
-        <button class="mini" data-act="addAlbum" data-gi="${d.dataset.gi}" data-key="${esc(key)}" title="Add album to list" aria-label="Add album to list">＋</button>
-        <button class="btn small" data-act="playAlbum" data-gi="${d.dataset.gi}" data-key="${esc(key)}">Play</button></div>`;
-    }
-    n++;
-    const who = !headed && view !== 'artist' && a.a ? `<em>${esc(a.a)}</em>` : '';
-    html += `<div class="trk" draggable="true" data-drag="track" data-gi="${d.dataset.gi}" data-id="${esc(t.id)}"><button class="track" data-act="playTrack" data-gi="${d.dataset.gi}" data-id="${esc(t.id)}"><small>${a.n || n}</small><span>${esc(tTitle(t))}${who}</span></button>
+  d.querySelector('.tracks').innerHTML = g.tracks.map((t, i) => {
+    const a = tg(t), who = view !== 'artist' && a.a ? `<em>${esc(a.a)}</em>` : '';
+    return `<div class="trk" draggable="true" data-drag="track" data-gi="${d.dataset.gi}" data-id="${esc(t.id)}"><button class="track" data-act="playTrack" data-gi="${d.dataset.gi}" data-id="${esc(t.id)}"><small>${a.n || i + 1}</small><span>${esc(tTitle(t))}${who}</span></button>
       <button class="mini" data-act="addTo" data-id="${esc(t.id)}" title="Add to list" aria-label="Add to list">＋</button>
       <button class="mini" data-act="editTags" data-id="${esc(t.id)}" title="Edit tags" aria-label="Edit tags">✎</button></div>`;
-  });
-  const box = d.querySelector('.tracks'); box.innerHTML = html; box.classList.toggle('byalb', headed);
+  }).join('');
   d.dataset.filled = '1'; markPlaying();
 }
 $('libraryBody').addEventListener('toggle', e => { if (e.target.matches && e.target.matches('details.album') && e.target.open) fillTracks(e.target); }, true);
@@ -1480,14 +1231,9 @@ $('libraryBody').addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   e.preventDefault(); e.stopPropagation();
   const act = el.dataset.act, g = el.dataset.gi !== undefined ? curGroups[+el.dataset.gi] : null;
-  if (act === 'retryLoad' || act === 'fullScan'){ const r = store.get('root'); if (r) openLibrary(r.id, r.name, act === 'fullScan'); return; }
   if (act === 'playGroup') setQueue(g.tracks, 0, g.name);
   else if (act === 'playTrack') setQueue(g.tracks, g.tracks.findIndex(t => t.id === el.dataset.id), g.name);
   else if (act === 'addGroup') addToBuild(g.tracks.slice());
-  else if (act === 'playAlbum' || act === 'addAlbum'){
-    const view = $('viewSel').value, tr = g.tracks.filter(t => albumKeyOf(t, view) === el.dataset.key);
-    if (act === 'playAlbum') setQueue(tr, 0, tg(tr[0] || {}).al || 'Unknown album'); else addToBuild(tr);
-  }
   else if (act === 'addTo') addToBuild([lib.tracks.get(el.dataset.id)]);
   else if (act === 'editTags') openTagEditor([lib.tracks.get(el.dataset.id)]);
   else if (act === 'editGroup') openTagEditor(g.tracks);
@@ -1575,7 +1321,7 @@ rp.addEventListener('click', async e => {
     const d = build.editing; if (!d || !confirm(`Delete “${d.name}” from OneDrive?`)) return;
     try {
       await gsend(itemPath(d.id), 'DELETE'); lib.nodes.delete(d.id); lib.playlists = lib.playlists.filter(x => x !== d);
-      build.editing = null; lib.at = Date.now(); renderLibrary(); persist(d.id); renderRight(); flash('Playlist deleted');
+      build.editing = null; lib.at = Date.now(); renderLibrary(); saveIndexQuiet(); renderRight(); flash('Playlist deleted');
     } catch(err){ msg('Could not delete: ' + err.message); }
   }
 });
@@ -1696,7 +1442,7 @@ async function savePlaylist(p, name, tracks){
     p = { id: r.id, pid: tgt.path ? tgt.id : lib.rid, k: 'p', sz: 0, name: fname, title: fname.replace(/\.[^.]+$/, ''), folder: tgt.path, path: tgt.path ? tgt.path + '/' + fname : fname, url: '', urlAt: 0, tracks: tracks.slice() };
     lib.nodes.set(p.id, p); lib.playlists.push(p); lib.playlists.sort((a, b) => cmpS(a.name, b.name));
   }
-  indexLib(); lib.at = Date.now(); renderLibrary(); renderRight(); persist(p.id);
+  indexLib(); lib.at = Date.now(); renderLibrary(); renderRight(); saveIndexQuiet();
   return p;
 }
 /* ---------- Tag editor ---------- */
@@ -1736,7 +1482,7 @@ async function openTagEditor(tracks){
         $('tmsg').textContent = `Writing ${++i}/${tracks.length}: ${t.name}`;
         try { await writeTags(t, ch); } catch(e){ errs.push(`${t.name}: ${e.message}`); }
       }
-      lib.at = Date.now(); renderLibrary(); await persist();
+      lib.at = Date.now(); renderLibrary(); await saveIndexQuiet();
       if (errs.length){
         $('tmsg').innerHTML = esc(`${tracks.length - errs.length} saved, ${errs.length} failed:`) + '<br>' + errs.slice(0, 5).map(esc).join('<br>');
         dlg.querySelectorAll('button').forEach(b => b.disabled = false);
@@ -1853,7 +1599,6 @@ async function runDownload(mode, dir, job){
 
 /* ---------- Player ---------- */
 const audio = $('audio');
-const PLAY_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>', PAUSE_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>';
 let queue = [], qi = -1, shuffle = false, repeat = 0, queueName = '', retried = false;
 
 function setQueue(tracks, startIndex, name){
@@ -1910,8 +1655,8 @@ $('bRepeat').onclick = () => { repeat = (repeat + 1) % 3; syncToggles(); };
 $('bNext').onclick = () => next(false);
 $('bPrev').onclick = prev;
 $('bPlay').onclick = () => { if (!audio.src && queue.length) playAt(qi < 0 ? 0 : qi); else audio.paused ? audio.play() : audio.pause(); };
-audio.addEventListener('play',  () => { $('bPlay').innerHTML = PAUSE_SVG; });
-audio.addEventListener('pause', () => { $('bPlay').innerHTML = PLAY_SVG; });
+audio.addEventListener('play',  () => { $('bPlay').textContent = '⏸'; });
+audio.addEventListener('pause', () => { $('bPlay').textContent = '▶'; });
 audio.addEventListener('ended', () => next(true));
 audio.addEventListener('timeupdate', () => {
   if (!seeking && audio.duration) $('seek').value = (audio.currentTime / audio.duration) * 1000;
@@ -1946,7 +1691,7 @@ function openPlFolderDialog(){
       try {
         const r = store.get('root');
         const d = await gsend(`${itemPath(lib.rid)}/children`, 'POST', { name: safe(name), folder: {}, '@microsoft.graph.conflictBehavior': 'fail' });
-        lib.nodes.set(d.id, { id: d.id, pid: lib.rid, name: d.name, d: 1 }); rebuild(); renderLibrary(); persist(d.id);
+        lib.nodes.set(d.id, { id: d.id, pid: lib.rid, name: d.name, d: 1 }); rebuild(); renderLibrary(); saveIndexQuiet();
         store.set('plFolder', { rootId: r.id, id: d.id }); openSettings('account');
       } catch(e){ $('plMsg').textContent = /409/.test(e.message) ? 'A folder with that name already exists in the music folder; pick it from the list.' : 'Could not create the folder: ' + e.message; }
     },
@@ -1960,12 +1705,11 @@ function openSettings(tab){
   let h = '<h2>Settings</h2>';
   if (signed) h += `<div class="stabs"><button class="seg ${which === 'library' ? 'on' : ''}" data-d="tab" data-t="library">Library</button><button class="seg ${which === 'account' ? 'on' : ''}" data-d="tab" data-t="account">Account &amp; appearance</button></div>`;
   if (which === 'library'){
-    h += `<div class="sgroup"><h3>Library</h3><p class="muted">${libSummary()}<br>Last updated: ${lib.at ? esc(new Date(lib.at).toLocaleString()) : 'never'}<br>Changes are checked automatically when the app opens. Quick update: ${lib.delta ? 'ready' : 'needs one full rescan first'}<br>Stored on this device and backed up to OneDrive. <span id="setStore"></span></p>
+    h += `<div class="sgroup"><h3>Library</h3><p class="muted">${libSummary()}<br>Last updated: ${lib.at ? esc(new Date(lib.at).toLocaleString()) : 'never'}<br>Changes are checked automatically when the app opens. Quick update: ${lib.delta ? 'ready' : 'needs one full rescan first'}</p>
       <div class="dbtns"><button class="btn small primary" data-d="quick" ${lib.delta ? '' : 'disabled'}>Update changes</button><button class="btn small" data-d="full">Full rescan</button></div></div>
       <div class="sgroup"><h3>Tag scan</h3><p class="muted" id="setTag" style="white-space:pre-line"></p>
       <div class="dbtns"><button class="btn small hidden" id="retryBtn" data-d="retry">Retry failed tags</button></div></div>
-      <div class="sgroup"><h3 id="errHead">Files with tag errors</h3><div class="dlist" id="errList" style="display:block"></div></div>
-      <div class="sgroup"><h3>Diagnostics</h3><div class="diag" id="setDiag"></div><div class="dbtns"><button class="btn small" data-d="diagcopy">Copy</button><button class="btn small" data-d="diagreset">Reset counters</button></div></div>`;
+      <div class="sgroup"><h3 id="errHead">Files with tag errors</h3><div class="dlist" id="errList" style="display:block"></div></div>`;
   } else {
     h += '<div class="sgroup"><h3>Account</h3>' + (signed
       ? `<p>Signed in${userName ? ' as <b>' + esc(userName) + '</b>' : ''}</p><div class="dbtns"><button class="btn small" data-d="signout">Sign out</button></div>`
@@ -1988,8 +1732,6 @@ function openSettings(tab){
     quick: () => quickUpdate(),
     full: () => { const rt = store.get('root'); if (rt) openLibrary(rt.id, rt.name, true); },
     retry: () => retryFailedTags(),
-    diagcopy: () => { const m = $('setMsg'); (navigator.clipboard ? navigator.clipboard.writeText(diagText()) : Promise.reject()).then(() => { if (m) m.textContent = 'Diagnostics copied.'; }, () => { if (m) m.textContent = 'Could not copy; select the text and copy it.'; }); },
-    diagreset: () => { diagReset(); updateTagStatus(true); },
     plfolder: () => openPlFolderDialog(),
     plroot: () => { store.set('plFolder', null); openSettings('account'); },
     reveal: el => { const t = lib.tracks.get(el.dataset.id); if (t){ dlg.close(); revealFolder(t.folder); } },
@@ -2005,15 +1747,11 @@ function openSettings(tab){
     dark: () => { setTheme('dark'); openSettings(); }
   });
   updateTagStatus(true);
-  try { navigator.storage.estimate().then(e => { const el = $('setStore'); if (el) el.textContent = `Local storage in use: ${(e.usage / 1048576).toFixed(1)} MB.`; }).catch(() => {}); } catch(_){}
 }
 
 /* ---------- Boot ---------- */
 $('signIn').addEventListener('click', signIn);
 $('settingsBtn').addEventListener('click', openSettings);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushDb(); });
-addEventListener('pagehide', () => { flushDb(); });
-if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 syncToggles(); setPane('left'); renderRight();
 setTheme(store.get('theme') || CONFIG.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 initAuth();
